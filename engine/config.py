@@ -125,10 +125,17 @@ class CaptureConfig(Model):
 
 
 class TimingConfig(Model):
-    """Measured in the calibration wizard, not guessed."""
+    """Measured in the calibration wizard, not guessed.
 
-    land_delay_ms: Annotated[int, Field(ge=0, le=5000)] = 1200
-    max_wait_ms: Annotated[int, Field(ge=1000, le=60000)] = 22000
+    Defaults come from a live WoW Forever session (2026-11-20, `tools.listen --bot`,
+    14 casts): the bobber's landing sound came 0.6-1.3 s after the cast key, and fish bit
+    6.8-25.9 s after it — longer than the Classic-era 22 s channel this used to assume.
+    """
+
+    #: Cast key -> start listening for the bite. Landing is done by ~1.3 s; the rest is margin.
+    land_delay_ms: Annotated[int, Field(ge=0, le=5000)] = 2000
+    #: Cast key -> give up and recast. Bites were seen up to 25.9 s after the cast.
+    max_wait_ms: Annotated[int, Field(ge=1000, le=60000)] = 30000
     post_hook_delay_ms: Annotated[int, Field(ge=0, le=5000)] = 900
     between_casts_ms: Annotated[int, Field(ge=0, le=10000)] = 600
     jitter_ms: Annotated[int, Field(ge=0, le=2000)] = 180  # randomises the fixed delays
