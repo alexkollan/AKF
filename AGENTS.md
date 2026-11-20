@@ -38,6 +38,7 @@ engine/
   capture.py        dxcam/mss, WoW window + monitor discovery, DPI aware
   input.py          SendInput scancodes, mouse move/click, window focus
   audio.py          WASAPI loopback stream, splash detector
+  clips.py          recorded-clip format: writer, loader, frame reader, cast segments
   vision/bobber.py  find bobber: HSV mask + template + blob scoring
   vision/bite.py    bite: drop/disappear/motion in ROI
   fsm.py            fishing state machine, modes A/B/C
@@ -62,6 +63,8 @@ uv run pytest                # tests (fixture-backed; none need the game)
 uv run ruff check .          # lint
 uv run ruff format .         # format
 uv run python -m tools.spike # capture + input smoke test, needs WoW running
+uv run python -m tools.record_clip --name <spot> --tags night,sea  # record fixtures
+uv run python -m tools.replay [clip]  # list fixtures, or play one with markers
 npm --prefix ui run dev      # UI dev server on http://localhost:5173
 npm --prefix ui run build    # typecheck + production build
 ```
@@ -87,6 +90,19 @@ makes the detection testable:
 
 > **Detectors must be testable on recorded fixtures with the game closed.** Any test that
 > needs WoW running is marked `@pytest.mark.needs_game` and is not part of the normal run.
+
+**Fixtures.** A clip is a directory: `meta.json`, `frames.json` (one timestamp per frame),
+`markers.json` (hand-editable ground truth), `video.mkv` (FFV1) or `frames/*.png`, and
+`audio.wav`. Video is always lossless, because HSV thresholds and frame diffs are exactly what
+a lossy codec corrupts. Load clips through `engine.clips`, never by reading the files directly.
+Media files are git-ignored (they run to hundreds of MB); move to Git LFS if they need sharing.
+
+**Audio timing.** WASAPI loopback delivers *nothing* while nothing plays — no callbacks, no
+zero buffers. Chunk timestamps therefore follow the sample count while audio flows and
+re-anchor to the wall clock after a gap (`engine.audio.stamp_chunk`), and anything that writes
+audio places it by timestamp (`ClipWriter.add_audio(..., at=t)`). Never derive time from
+"samples received so far". The captured level also follows the Windows output volume, so
+detectors must work on ratios to a noise floor, never on absolute amplitude.
 
 **Coordinates.** All geometry is relative to the WoW *client area*, in physical pixels. The
 process is per-monitor DPI aware (`SetProcessDpiAwarenessContext`), so two monitors with
