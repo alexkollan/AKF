@@ -100,9 +100,9 @@ def test_pixel_fusion_is_refused_for_a_real_game():
         Session(profile, dry_run=True).run(duration_s=1)
 
 
-@pytest.mark.parametrize(("spec", "vk"), [("<f12>", 0x7B), ("f10", 0x79), ("<F9>", 0x78)])
-def test_parse_hotkey(spec, vk):
-    assert parse_hotkey(spec) == vk
+@pytest.mark.parametrize(("spec", "name"), [("<f12>", "f12"), ("f10", "f10"), ("<F9>", "f9")])
+def test_parse_hotkey(spec, name):
+    assert parse_hotkey(spec) == name
 
 
 def test_hotkey_chords_are_rejected_for_now():

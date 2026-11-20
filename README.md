@@ -10,6 +10,7 @@ and lets you set everything up. The full specification is in `docs/PLAN.md`.
 ## What you need
 
 - Windows 10 2004 or later (Windows 11 recommended), with WoW Forever (`Wow.exe`).
+  macOS is not supported yet; the port is planned in `docs/MACOS_PORT.md`.
 - [uv](https://docs.astral.sh/uv/) and Node.js 22 or later.
 
 ```bash

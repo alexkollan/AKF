@@ -38,7 +38,8 @@ from engine import protocol as proto
 from engine.audio import AudioError
 from engine.calibration import CalibrationError
 from engine.controller import Controller
-from engine.hotkeys import SwallowingHotkeys
+from engine.hotkeys import GlobalHotkeys
+from engine.input import InputError
 from engine.session import Session
 
 logger = logging.getLogger(__name__)
@@ -89,13 +90,13 @@ class HotkeyBinder:
 
     def __init__(self, controller: Controller) -> None:
         self.controller = controller
-        self._hotkeys: SwallowingHotkeys | None = None
+        self._hotkeys: GlobalHotkeys | None = None
 
     def bind(self, settings: cfg.Settings) -> None:
         self.unbind()
         keys = settings.hotkeys
         try:
-            self._hotkeys = SwallowingHotkeys(
+            self._hotkeys = GlobalHotkeys(
                 {
                     keys.start_stop: self.controller.toggle_start_stop,
                     keys.pause: self.controller.toggle_pause,
@@ -103,7 +104,7 @@ class HotkeyBinder:
                 }
             )
             self._hotkeys.start()
-        except ValueError as exc:
+        except (ValueError, InputError) as exc:  # a chord, or a key name nobody knows
             self._hotkeys = None
             self.controller.report_error(f"hotkeys not active: {exc}")
 

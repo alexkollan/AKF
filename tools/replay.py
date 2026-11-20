@@ -43,7 +43,11 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import pyaudiowpatch as pyaudio
+
+try:  # the Windows fork; plain PyAudio elsewhere. Both expose the same playback API.
+    import pyaudiowpatch as pyaudio
+except ImportError:  # pragma: no cover - non-Windows
+    import pyaudio
 
 from engine.clips import (
     MARKER_BITE,

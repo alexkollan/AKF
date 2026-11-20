@@ -30,7 +30,7 @@ from pathlib import Path
 from engine import clock
 from engine.config import Mode, Profile, list_profiles, load_profile, load_settings
 from engine.fsm import FsmEvent, Status
-from engine.hotkeys import SwallowingHotkeys
+from engine.hotkeys import GlobalHotkeys
 from engine.session import Session, SessionError
 
 COUNTDOWN_S = 3
@@ -133,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
     settings = load_settings()
     hotkeys = None
     if not args.fast:
-        hotkeys = SwallowingHotkeys(
+        hotkeys = GlobalHotkeys(
             {
                 settings.hotkeys.pause: lambda: session.request("toggle_pause"),
                 settings.hotkeys.emergency_stop: lambda: session.request("emergency_stop"),

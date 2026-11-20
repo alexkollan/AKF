@@ -4,18 +4,20 @@ version = "0.1.0"
 description = "Pixel/audio fishing bot for WoW Forever, with a local engine service and a React UI"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "dxcam>=0.0.5",
     "mss>=9.0.2",
     "opencv-python>=4.10.0",
     "numpy>=1.26",
     "pillow>=10.4",
-    "pyaudiowpatch>=0.2.12.7",
-    "pywin32>=306",
     "pynput>=1.7.7",
     "pydantic>=2.9",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "pywebview>=5.3",
+    # The Windows backend (engine/native/windows). Nothing outside it imports these.
+    "dxcam>=0.0.5; sys_platform == 'win32'",
+    "comtypes>=1.4; sys_platform == 'win32'",
+    "pyaudiowpatch>=0.2.12.7; sys_platform == 'win32'",
+    "pywin32>=306; sys_platform == 'win32'",
 ]
 
 [dependency-groups]

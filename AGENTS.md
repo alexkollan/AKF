@@ -19,7 +19,7 @@ grind-bot features now.
 
 | Layer | Choice |
 | --- | --- |
-| Runtime | Python 3.12 on Windows 10/11, managed by `uv` |
+| Runtime | Python 3.12 on Windows 10/11 (macOS port in progress, `docs/MACOS_PORT.md`), managed by `uv` |
 | Screen capture | `dxcam` (DXGI), `mss` fallback |
 | Vision | `opencv-python` + `numpy` |
 | Audio | `PyAudioWPatch` (WASAPI loopback) |
@@ -35,10 +35,13 @@ grind-bot features now.
 
 ```
 engine/
-  capture.py        dxcam/mss, WoW window + monitor discovery, DPI aware
-  input.py          SendInput scancodes, mouse move/click, window focus
-  audio.py          endpoint loopback stream, source selection, splash detector
-  audio_process.py  process loopback: capture Wow.exe audio only (COM, Windows 11)
+  capture.py        geometry, WoW window + monitor discovery, capture (native fast path, mss)
+  input.py          InputController: keys, mouse move/click, dry run, release-all; focus
+  keys.py           portable key names; backends map them to native codes
+  audio.py          AudioChunk/AudioSource, source selection, wav files, splash detector
+  native/           the only OS-specific code: the Platform protocol and its backends
+    windows/        dxcam, SendInput, WASAPI + process loopback (COM), keyboard hook
+    unsupported.py  any other OS until it has a backend: portable parts work, rest errors
   clips.py          recorded-clip format: writer, loader, frame reader, cast segments
   clock.py          the one high-resolution clock (QPC) everything is stamped with
   vision/bobber.py  find bobber: HSV mask + template + blob scoring
@@ -47,7 +50,7 @@ engine/
   session.py        wires the FSM to audio, input and focus (or a simulated world)
   run.py            headless CLI: python -m engine.run [--dry-run] [--simulate --fast]
   app.py            desktop app: server + pywebview window on the remembered monitor
-  hotkeys.py        global hotkeys that are swallowed before they reach WoW
+  hotkeys.py        global hotkeys, swallowed before they reach WoW (or just watched)
   bridge.py         decodes the FishBridge addon's colour strip (bags, combat, lure, channel)
   calibration.py    the calibration wizard's steps and the analyses behind its suggestions
   lures.py          lure timer + apply sequence
@@ -120,17 +123,27 @@ makes the detection testable:
 a lossy codec corrupts. Load clips through `engine.clips`, never by reading the files directly.
 Media files are git-ignored (they run to hundreds of MB); move to Git LFS if they need sharing.
 
+**Platforms.** Only `engine/native/` talks to the operating system. `engine.native.Platform`
+lists what a backend provides (monitors and windows, a fast capture, keys and mouse, focus, game
+audio, global hotkeys); `engine.native.current()` picks one lazily, so importing any other
+module never loads `pywin32`, `dxcam`, `comtypes` or `PyAudioWPatch`. Code outside `native/`
+uses the facades (`engine.capture`, `engine.input`, `engine.audio`, `engine.hotkeys`), names
+keys by their portable names (`engine.keys`), and never imports a backend directly.
+Windows-only packages carry a `sys_platform == 'win32'` marker in `pyproject.toml`.
+`tests/test_portability.py` blocks every Windows library and runs a simulated session; keep it
+green. The macOS backend is the next step: `docs/MACOS_PORT.md`.
+
 **Clock.** Everything that gets compared in time — frames, audio chunks, markers, input
 actions — is stamped with `engine.clock.now()` (`perf_counter`, QPC, 100 ns). On Windows
 `time.monotonic()` is `GetTickCount64` with 15.6 ms steps; never use it, or `time.time()`, for
 anything timed. WASAPI packet timestamps are QPC too (`clock.from_qpc`), so audio, video and
 hotkeys share one timeline.
 
-**Audio source.** The default is **process loopback** (`engine.audio_process`): it captures
+**Audio source.** The default is **process loopback** (`engine.native.windows.process_loopback`): it captures
 `Wow.exe` alone, so Discord, music or a browser can never fake a bite. It is driven through COM
 with `comtypes` on its own MTA thread, and its chunks carry exact QPC capture times.
 `engine.audio.open_audio_source(pid)` picks it and falls back to **endpoint loopback**
-(`LoopbackStream`, everything the device plays) only when unavailable or asked for.
+(`wasapi.LoopbackStream`, everything the device plays) only when unavailable or asked for.
 
 **Audio timing on the endpoint fallback.** Endpoint loopback delivers *nothing* while nothing
 plays — no callbacks, no zero buffers. Its chunk timestamps follow the sample count while audio
@@ -206,6 +219,9 @@ silently ignored key.
   idle. The Dashboard fits a 1080p screen with no scrolling.
 
 ## Working on this repo
+
+Chat with the user in Greek; everything written to disk (code, comments, docs, commits) is in
+English.
 
 Milestones run in order (`docs/PLAN.md`, "milestones"), and detection (M2-M3) lands before the
 UI because that is where the risk is. Anything that needs the game open — calibration, clip

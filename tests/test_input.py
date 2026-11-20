@@ -1,43 +1,37 @@
-"""Key resolution and the dry-run controller. No key ever leaves this process."""
+"""Key names and the dry-run controller. No key ever leaves this process.
+
+The Windows scancode mapping is tested in ``test_native_windows.py``.
+"""
 
 import pytest
 
-from engine.input import InputController, InputError, MouseButton, scancode, virtual_key
+from engine.input import InputController, InputError, MouseButton, check_key
+from engine.keys import normalize_key
 
 
-def test_letters_and_digits_map_by_position():
-    assert virtual_key("a") == 0x41
-    assert virtual_key("Z") == 0x5A
-    assert virtual_key("7") == 0x37
-
-
-def test_named_keys():
-    assert virtual_key("f8") == virtual_key("F8")
-    assert virtual_key("shift") == virtual_key("lshift")
-    assert virtual_key("esc") == virtual_key("escape")
+def test_names_are_canonical():
+    assert normalize_key("A") == "a"
+    assert normalize_key(" F8 ") == "f8"
+    assert normalize_key("shift") == "lshift"
+    assert normalize_key("esc") == "escape"
+    assert normalize_key("return") == "enter"
+    assert normalize_key("]") == "]"
 
 
 def test_unknown_key_is_an_error():
     with pytest.raises(InputError):
-        virtual_key("wiggle")
+        normalize_key("wiggle")
     with pytest.raises(InputError):
-        virtual_key("  ")
+        normalize_key("  ")
+    with pytest.raises(InputError):
+        check_key("wiggle")
 
 
-@pytest.mark.parametrize("key", ["a", "1", "f8", "space", "numpad5", "up", "delete"])
-def test_every_bindable_key_has_a_scancode(key):
-    code, _extended = scancode(key)
-    assert code > 0
-
-
-@pytest.mark.parametrize("key", ["up", "down", "left", "right", "delete", "home"])
-def test_navigation_keys_are_extended(key):
-    _code, extended = scancode(key)
-    assert extended, f"{key} needs the E0 prefix or the game reads the numpad twin"
-
-
-def test_letters_are_not_extended():
-    assert scancode("a")[1] is False
+def test_dry_run_rejects_an_unknown_key_before_recording_it():
+    controller = InputController(dry_run=True)
+    with pytest.raises(InputError):
+        controller.tap("wiggle")
+    assert controller.actions == []
 
 
 def test_dry_run_records_instead_of_sending():

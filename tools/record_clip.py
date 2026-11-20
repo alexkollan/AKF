@@ -40,10 +40,9 @@ import logging
 import sys
 import threading
 from collections import deque
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-
-from pynput import keyboard
 
 from engine import audio as audio_mod
 from engine import capture, clock
@@ -56,22 +55,19 @@ from engine.clips import (
     ClipWriter,
 )
 from engine.config import CaptureBackend, RoiFraction
+from engine.hotkeys import GlobalHotkeys
 
 DEFAULT_OUT = Path("tests/fixtures")
 
-VK_F7, VK_F8, VK_F9, VK_F10, VK_F12 = 0x76, 0x77, 0x78, 0x79, 0x7B
-
-MARKER_KEYS: dict[int, tuple[str, str]] = {
-    VK_F7: (MARKER_CAST, "cast"),
-    VK_F8: (MARKER_LANDED, "bobber landed"),
-    VK_F9: (MARKER_BITE, "bite"),
+MARKER_KEYS: dict[str, tuple[str, str]] = {
+    "f7": (MARKER_CAST, "cast"),
+    "f8": (MARKER_LANDED, "bobber landed"),
+    "f9": (MARKER_BITE, "bite"),
 }
-STOP_KEY = VK_F10
-DISCARD_KEY = VK_F12
+STOP_KEY = "f10"
+DISCARD_KEY = "f12"
 #: Every key the recorder owns. These are blocked from reaching any application.
 OWNED_KEYS = frozenset({*MARKER_KEYS, STOP_KEY, DISCARD_KEY})
-
-WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP = 0x0100, 0x0101, 0x0104, 0x0105
 
 logger = logging.getLogger("record_clip")
 
@@ -123,10 +119,9 @@ def build_parser() -> argparse.ArgumentParser:
 class MarkerListener:
     """Global hotkeys for the marker keys, timestamped the instant they are pressed.
 
-    Runs as a low-level keyboard hook filter. For the keys in :data:`OWNED_KEYS` it records
-    the press and then *suppresses* the event, so it never reaches WoW; everything else is
-    left alone. Holding a key down produces auto-repeat keydowns, which are ignored so one
-    press is always one marker.
+    The keys in :data:`OWNED_KEYS` are swallowed (``engine.hotkeys``), so they never reach
+    WoW; everything else is left alone. Holding a key down fires once, so one press is
+    always one marker.
     """
 
     def __init__(self, t0: float) -> None:
@@ -135,14 +130,13 @@ class MarkerListener:
         self.stop_requested = False
         self.discard_requested = False
         self._lock = threading.Lock()
-        self._held: set[int] = set()
-        self._listener = keyboard.Listener(win32_event_filter=self._filter)
+        self._hotkeys = GlobalHotkeys({key: self._handler(key) for key in OWNED_KEYS})
 
     def start(self) -> None:
-        self._listener.start()
+        self._hotkeys.start()
 
     def stop(self) -> None:
-        self._listener.stop()
+        self._hotkeys.stop()
 
     def drain(self) -> list[tuple[float, str, str]]:
         with self._lock:
@@ -150,40 +144,29 @@ class MarkerListener:
             self.pending.clear()
         return items
 
-    def _filter(self, msg: int, data: object) -> bool:
-        """pynput ``win32_event_filter``: runs on the hook thread for every key event."""
-        # Timestamp first: everything after this costs time we do not want in the marker.
-        now = clock.now() - self.t0
-        vk = int(getattr(data, "vkCode", 0))
-        if vk not in OWNED_KEYS:
-            return True
+    def _handler(self, key: str) -> Callable[[], None]:
+        def handle() -> None:
+            # Timestamp first: everything after this costs time we do not want in the marker.
+            self.handle(key, clock.now() - self.t0)
 
-        if msg in (WM_KEYDOWN, WM_SYSKEYDOWN):
-            if vk not in self._held:
-                self._held.add(vk)
-                self._handle(vk, now)
-        elif msg in (WM_KEYUP, WM_SYSKEYUP):
-            self._held.discard(vk)
+        return handle
 
-        # Raises inside pynput, which makes the hook return non-zero: the key stops here.
-        self._listener.suppress_event()
-        return False
-
-    def _handle(self, vk: int, now: float) -> None:
-        if vk in MARKER_KEYS:
-            kind, label = MARKER_KEYS[vk]
+    def handle(self, key: str, now: float) -> None:
+        """One press of an owned key at ``now`` (seconds since ``t0``)."""
+        if key in MARKER_KEYS:
+            kind, label = MARKER_KEYS[key]
             with self._lock:
                 self.pending.append((now, kind, label))
-        elif vk == STOP_KEY:
+        elif key == STOP_KEY:
             self.stop_requested = True
-        elif vk == DISCARD_KEY:
+        elif key == DISCARD_KEY:
             self.discard_requested = True
 
 
 def print_devices() -> None:
     devices = audio_mod.list_loopback_devices()
     if not devices:
-        print("no WASAPI loopback devices found")
+        print("no loopback devices found")
         return
     print("loopback devices:")
     for device in devices:

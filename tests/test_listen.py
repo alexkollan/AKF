@@ -5,12 +5,10 @@ console wraps, and every in-place redraw becomes a new row of output.
 """
 
 import pytest
-from pynput import keyboard
 
+from engine import clock
 from engine.audio import DetectorLevel
 from tools.listen import KeyGate, KeyWatcher, meter
-
-VK_OEM_6 = 0xDD  # the "]" key
 
 
 @pytest.mark.parametrize("width", [40, 60, 80, 100, 160])
@@ -56,20 +54,11 @@ def test_since_press_text():
     assert gate.since_press(12.5).strip() == "2.5s after key"
 
 
-def test_watcher_matches_the_key_by_virtual_key_code():
-    watcher = KeyWatcher("]", origin=0.0)
-    assert watcher._matches(keyboard.KeyCode.from_vk(VK_OEM_6))
-    assert not watcher._matches(keyboard.KeyCode.from_vk(0x42))  # B
-    assert not watcher._matches(keyboard.Key.space)
-    assert not watcher._matches(None)
-
-
-def test_watcher_counts_one_press_per_hold():
-    watcher = KeyWatcher("]", origin=0.0)
-    key = keyboard.KeyCode.from_vk(VK_OEM_6)
-    for _ in range(4):  # auto-repeat while held
-        watcher._down(key)
-    watcher._up(key)
-    watcher._down(key)
-    assert len(watcher.drain()) == 2
+def test_watcher_stamps_each_press_against_its_origin():
+    watcher = KeyWatcher("]", origin=clock.now() - 5.0)
+    watcher.pressed()
+    watcher.pressed()
+    presses = watcher.drain()
+    assert len(presses) == 2
+    assert all(4.9 < t < 6.0 for t in presses)
     assert watcher.drain() == []

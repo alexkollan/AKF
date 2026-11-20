@@ -11,7 +11,6 @@ import socket
 import threading
 import time
 import urllib.request
-from types import SimpleNamespace
 
 import pytest
 import uvicorn
@@ -19,7 +18,6 @@ from websockets.exceptions import InvalidStatus
 from websockets.sync.client import connect
 
 from engine.controller import Controller
-from engine.hotkeys import SwallowingHotkeys
 from engine.server import allowed_origins, create_app
 from engine.session import Session
 
@@ -160,25 +158,3 @@ def test_the_ui_origins_are_accepted(server):
     for origin in sorted(allowed_origins(8777)):
         with open_socket(server, origin=origin):
             pass
-
-
-def test_hotkeys_call_the_controller_and_are_swallowed(monkeypatch):
-    calls = []
-    hotkeys = SwallowingHotkeys({"<f9>": lambda: calls.append("f9")})
-
-    class Swallowed(Exception):
-        pass
-
-    def suppress():
-        raise Swallowed
-
-    monkeypatch.setattr(hotkeys._listener, "suppress_event", suppress)
-
-    with pytest.raises(Swallowed):
-        hotkeys._filter(0x0100, SimpleNamespace(vkCode=0x78))  # F9 down
-    with pytest.raises(Swallowed):
-        hotkeys._filter(0x0100, SimpleNamespace(vkCode=0x78))  # auto-repeat
-    with pytest.raises(Swallowed):
-        hotkeys._filter(0x0101, SimpleNamespace(vkCode=0x78))  # F9 up
-    assert calls == ["f9"]
-    assert hotkeys._filter(0x0100, SimpleNamespace(vkCode=0x42)) is True  # B passes through

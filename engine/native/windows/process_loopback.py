@@ -1,9 +1,9 @@
 """Process loopback: capture the audio of one process (and its children) and nothing else.
 
-Endpoint loopback (``engine.audio.LoopbackStream``) hears everything Windows plays: Discord,
-a browser tab, music. Every one of those is a potential false bite. Windows 10 2004+ /
-Windows 11 can instead tap a single process's audio before it is mixed, which is exactly
-what a splash detector wants: WoW's sound effects and nothing else.
+Endpoint loopback (``engine.native.windows.wasapi.LoopbackStream``) hears everything Windows
+plays: Discord, a browser tab, music. Every one of those is a potential false bite. Windows
+10 2004+ / Windows 11 can instead tap a single process's audio before it is mixed, which is
+exactly what a splash detector wants: WoW's sound effects and nothing else.
 
 There is no Python binding for this, so it is driven through COM with ``comtypes``,
 following Microsoft's *ApplicationLoopback* sample:
@@ -300,7 +300,7 @@ def supported() -> bool:
 
 
 class ProcessLoopbackStream:
-    """Capture one process tree's audio. Same surface as ``engine.audio.LoopbackStream``.
+    """Capture one process tree's audio. Same surface as ``wasapi.LoopbackStream``.
 
     ``read``/``drain`` hand out :class:`~engine.audio.AudioChunk` objects whose ``t`` is
     seconds since :attr:`start_time` on the shared clock, taken from WASAPI's own capture

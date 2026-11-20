@@ -33,12 +33,11 @@ import shutil
 import sys
 import threading
 
-from pynput import keyboard
-
 from engine import audio as audio_mod
 from engine import capture, clock
 from engine.config import AudioDetectorConfig, KeyBindings, TimingConfig
-from engine.input import InputError, virtual_key
+from engine.hotkeys import GlobalHotkeys
+from engine.input import InputError, check_key
 
 METER_MIN_DB = -80.0
 METER_MAX_DB = 0.0
@@ -196,41 +195,28 @@ class KeyWatcher:
     """Timestamps presses of one key without blocking it — WoW still receives it."""
 
     def __init__(self, key_name: str, origin: float) -> None:
-        self.vk = virtual_key(key_name)
         self.key_name = key_name
         self.origin = origin
         self._pending: list[float] = []
-        self._held = False
         self._lock = threading.Lock()
-        self._listener = keyboard.Listener(on_press=self._down, on_release=self._up)
+        # One press per hold is the hook's job; auto-repeat never reaches pressed().
+        self._hotkeys = GlobalHotkeys({key_name: self.pressed}, swallow=False)
 
     def start(self) -> None:
-        self._listener.start()
+        self._hotkeys.start()
 
     def stop(self) -> None:
-        self._listener.stop()
+        self._hotkeys.stop()
 
     def drain(self) -> list[float]:
         with self._lock:
             presses, self._pending = self._pending, []
         return presses
 
-    def _matches(self, key: keyboard.Key | keyboard.KeyCode | None) -> bool:
-        code = getattr(key, "vk", None)
-        if code is None and key is not None and hasattr(key, "value"):
-            code = getattr(key.value, "vk", None)
-        return code == self.vk
-
-    def _down(self, key: keyboard.Key | keyboard.KeyCode | None) -> None:
+    def pressed(self) -> None:
         now = clock.now() - self.origin
-        if self._matches(key) and not self._held:  # ignore auto-repeat
-            self._held = True
-            with self._lock:
-                self._pending.append(now)
-
-    def _up(self, key: keyboard.Key | keyboard.KeyCode | None) -> None:
-        if self._matches(key):
-            self._held = False
+        with self._lock:
+            self._pending.append(now)
 
 
 def resolve_pid(args: argparse.Namespace) -> tuple[int | None, str]:
@@ -256,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
         config = AudioDetectorConfig(
             trigger_ratio=args.ratio, floor_min_dbfs=args.floor_min, band_hz=tuple(args.band)
         )
-        virtual_key(args.key)
+        check_key(args.key)
         source = audio_mod.open_audio_source(pid, device_index=args.audio_device)
     except (capture.WindowNotFoundError, audio_mod.AudioError, InputError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
