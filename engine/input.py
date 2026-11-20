@@ -27,6 +27,7 @@ import win32con
 import win32gui
 import win32process
 
+from engine import clock
 from engine.capture import Rect, WindowInfo, ensure_dpi_awareness
 
 logger = logging.getLogger(__name__)
@@ -473,7 +474,7 @@ class InputController:
     # -- internals ---------------------------------------------------------------------
 
     def _record(self, kind: str, target: str) -> None:
-        action = InputAction(kind=kind, target=target, at=time.monotonic())
+        action = InputAction(kind=kind, target=target, at=clock.now())
         self.actions.append(action)
         if self.dry_run:
             logger.info("dry-run %s %s", kind, target)

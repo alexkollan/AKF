@@ -33,13 +33,13 @@ from engine.config import CaptureBackend, RoiFraction
 
 logger = logging.getLogger(__name__)
 
-# WoW has shipped under several executable names; Forever uses a 1.60.1 client, so the
-# Classic name is the likely one. The active profile overrides this.
+# WoW Forever runs on the Mainline (retail) client as Wow.exe — confirmed in-game. The
+# rest are fallbacks for other Blizzard clients; the active profile overrides this list.
 DEFAULT_WOW_PROCESSES: tuple[str, ...] = (
-    "WowClassic.exe",
     "Wow.exe",
     "WowT.exe",
     "WowB.exe",
+    "WowClassic.exe",
     "World of Warcraft.exe",
 )
 

@@ -25,8 +25,13 @@ it belongs, then ``s`` to save. Good fixtures are worth the minute it takes.
   q, Esc     quit
 ===========  ==================================================================
 
-M3 adds detector metrics (bobber found rate, bite latency against the markers, false
-positives per cast) to this same tool.
+**Scoring the detector.** ``--metrics`` replays every fixture through the bite detector the
+way the bot runs it and checks the M3 acceptance criteria; ``--sweep`` tries several trigger
+ratios side by side. See ``tools.metrics`` for how each cast is judged.
+
+    uv run python -m tools.replay --metrics              # all fixtures
+    uv run python -m tools.replay <clip> --metrics       # one clip
+    uv run python -m tools.replay --sweep 2.5 3 3.5 4 5  # pick a ratio from data
 """
 
 from __future__ import annotations
@@ -47,9 +52,12 @@ from engine.clips import (
     Clip,
     ClipError,
     FrameReader,
+    Marker,
     list_clips,
     load_clip,
 )
+from engine.config import AudioDetectorConfig
+from tools import metrics
 
 DEFAULT_FIXTURES = Path("tests/fixtures")
 
@@ -436,7 +444,7 @@ class Player:
         else:
             print(f"added {kind} at {t:.2f}s")
         self.clip.markers.append(
-            existing.model_copy(update={"t": t}) if existing else _new_marker(kind, t)
+            existing.model_copy(update={"t": t}) if existing else Marker(t=t, kind=kind)
         )
         self.dirty = True
 
@@ -448,12 +456,6 @@ class Player:
         self.clip.markers.remove(marker)
         self.dirty = True
         print(f"deleted {marker.kind} at {marker.t:.2f}s")
-
-
-def _new_marker(kind: str, t: float):  # noqa: ANN202 - Marker, imported lazily for clarity
-    from engine.clips import Marker
-
-    return Marker(t=t, kind=kind)
 
 
 # --------------------------------------------------------------------------------------
@@ -520,6 +522,43 @@ def summarise_all(root: Path) -> int:
     return 0
 
 
+def run_metrics(args: argparse.Namespace) -> int:
+    paths = [args.clip] if args.clip else list_clips(args.fixtures)
+    try:
+        clips = [load_clip(path) for path in paths]
+    except ClipError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if not clips:
+        print(
+            f"no clips in {args.fixtures} — record some with `uv run python -m tools.record_clip`"
+        )
+        return 1
+
+    overrides: dict[str, float] = {}
+    if args.ratio is not None:
+        overrides["trigger_ratio"] = args.ratio
+    if args.floor_min is not None:
+        overrides["floor_min_dbfs"] = args.floor_min
+    config = AudioDetectorConfig(**overrides)
+
+    if args.sweep:
+        print(f"{len(clips)} clip(s), sweeping trigger ratio:\n")
+        print(metrics.sweep(clips, args.sweep, config))
+        return 0
+
+    report = metrics.score_clips(clips, config)
+    if not report.casts:
+        print("no scorable casts — clips need audio and cast or landed markers")
+        return 1
+    print(
+        f"{len(clips)} clip(s), trigger ratio {config.trigger_ratio}, "
+        f"floor >= {config.floor_min_dbfs} dBFS\n"
+    )
+    print(metrics.format_report(report))
+    return 0 if report.passed else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)-7s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(prog="tools.replay", description=__doc__)
@@ -527,8 +566,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fixtures", type=Path, default=DEFAULT_FIXTURES)
     parser.add_argument("--info", action="store_true", help="print the clip summary and exit")
     parser.add_argument("--no-audio", action="store_true", help="play without sound")
+    parser.add_argument("--metrics", action="store_true", help="score the bite detector")
+    parser.add_argument(
+        "--sweep", type=float, nargs="+", metavar="RATIO", help="score several trigger ratios"
+    )
+    parser.add_argument("--ratio", type=float, default=None, help="trigger ratio override")
+    parser.add_argument("--floor-min", type=float, default=None, help="floor clamp in dBFS")
     args = parser.parse_args(argv)
 
+    if args.metrics or args.sweep:
+        return run_metrics(args)
     if args.clip is None:
         return summarise_all(args.fixtures)
 

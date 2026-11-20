@@ -16,17 +16,22 @@ chunks into a queue and returns. Nothing in this module may be called from the a
 from __future__ import annotations
 
 import logging
+import math
 import queue
 import threading
-import time
 import wave
+from collections import deque
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
+from typing import Protocol
 
 import numpy as np
 import pyaudiowpatch as pyaudio
+
+from engine import clock
+from engine.config import AudioDetectorConfig
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +65,7 @@ class AudioDevice:
 class AudioChunk:
     """A block of loopback samples.
 
-    ``t`` is seconds since the stream started, taken from the same monotonic clock as the
+    ``t`` is seconds since the stream started, on the shared clock (``engine.clock``), like the
     frame timestamps, which is what lets a recorded clip line audio up with video.
     ``samples`` is ``(frames, channels)`` int16.
     """
@@ -168,11 +173,14 @@ class LoopbackStream:
     ) -> None:
         self.device = device or default_loopback_device()
         self.chunk_frames = max(16, int(self.device.sample_rate * chunk_ms / 1000))
+        self.sample_rate = self.device.sample_rate
+        self.channels = self.device.channels
+        self.name = f"endpoint loopback {self.device.name}"
         self.dropped = 0
 
         self._queue: queue.Queue[AudioChunk] = queue.Queue(maxsize=max_queued_chunks)
         self._audio = _open_pyaudio()
-        self._start_monotonic = 0.0
+        self._start_time = 0.0
         self._frames_seen = 0
         self._lock = threading.Lock()
 
@@ -195,7 +203,7 @@ class LoopbackStream:
     # -- lifecycle ---------------------------------------------------------------------
 
     def start(self) -> None:
-        self._start_monotonic = time.monotonic()
+        self._start_time = clock.now()
         self._stream.start_stream()
 
     def close(self) -> None:
@@ -236,9 +244,9 @@ class LoopbackStream:
                 return
 
     @property
-    def start_monotonic(self) -> float:
+    def start_time(self) -> float:
         """Reference point for chunk timestamps, shared with the frame clock."""
-        return self._start_monotonic
+        return self._start_time
 
     def _on_chunk(
         self,
@@ -249,7 +257,7 @@ class LoopbackStream:
     ) -> tuple[bytes | None, int]:
         """PortAudio callback. Keep it short: enqueue and return."""
         if in_data:
-            arrived = time.monotonic() - self._start_monotonic
+            arrived = clock.now() - self._start_time
             with self._lock:
                 t = stamp_chunk(self._frames_seen, frame_count, self.device.sample_rate, arrived)
                 self._frames_seen = round(t * self.device.sample_rate) + frame_count
@@ -342,3 +350,230 @@ def read_wav(path: Path) -> tuple[np.ndarray, int]:
     if channels > 1:
         samples = samples.reshape(-1, channels)
     return samples, rate
+
+
+# --------------------------------------------------------------------------------------
+# choosing a source
+# --------------------------------------------------------------------------------------
+
+
+class AudioSource(Protocol):
+    """What the recorder, the listener and the engine need from any audio capture."""
+
+    name: str
+    sample_rate: int
+    channels: int
+    dropped: int
+
+    @property
+    def start_time(self) -> float: ...
+
+    def start(self) -> None: ...
+
+    def close(self) -> None: ...
+
+    def read(self, timeout: float | None = 0.5) -> AudioChunk | None: ...
+
+    def drain(self) -> Iterator[AudioChunk]: ...
+
+
+def open_audio_source(
+    pid: int | None = None,
+    *,
+    device_index: int | None = None,
+    chunk_ms: int = 20,
+    allow_endpoint_fallback: bool = True,
+) -> AudioSource:
+    """The best available capture for the game.
+
+    With a ``pid``, try process loopback first: it hears only WoW, so Discord and music
+    cannot fake a bite. Without one, or when it is unavailable, fall back to endpoint
+    loopback on the configured device and say so — the fallback works, it is just noisier.
+    The returned source is not started yet.
+    """
+    if pid is not None:
+        from engine.audio_process import ProcessLoopbackStream, supported
+
+        if supported():
+            return ProcessLoopbackStream(pid)
+        message = "process loopback is not supported on this Windows build"
+        if not allow_endpoint_fallback:
+            raise AudioError(message)
+        logger.warning("%s; falling back to endpoint loopback (hears every app)", message)
+
+    return LoopbackStream(resolve_device(device_index), chunk_ms=chunk_ms)
+
+
+# --------------------------------------------------------------------------------------
+# splash detector
+# --------------------------------------------------------------------------------------
+
+#: Windows the floor must have seen before a bite may fire, so the very first sound after
+#: start-up is not judged against an empty history.
+WARMUP_WINDOWS = 10
+
+
+def to_dbfs(value: float) -> float:
+    """Linear RMS (full scale = 1.0) to dBFS, clamped at -120."""
+    return 20.0 * math.log10(max(value, 1e-6))
+
+
+def from_dbfs(value: float) -> float:
+    return 10.0 ** (value / 20.0)
+
+
+@dataclass(frozen=True, slots=True)
+class BiteEvent:
+    """The detector's verdict. ``t`` is when it *could* have known: the end of the window."""
+
+    t: float
+    level_db: float
+    floor_db: float
+    ratio: float
+    source: str = "audio"
+
+
+@dataclass(frozen=True, slots=True)
+class DetectorLevel:
+    """One analysed window, for the live chart and the replay plots."""
+
+    t: float
+    level_db: float
+    floor_db: float
+    threshold_db: float
+    armed: bool
+
+
+class SplashDetector:
+    """Find the bite splash in a stream of audio chunks.
+
+    Pure and replayable: no capture, no clock — timestamps arrive with the chunks — so the
+    same object runs live and over a recorded wav.
+
+    Per analysis window it measures RMS inside ``band_hz`` (Hann window + FFT), compares it
+    with a rolling **median** of recent windows, and fires on the *rising edge* — the first
+    window over ``trigger_ratio`` after one that was under it. A splash is an onset; a level
+    that stays up (rain starting, the tail of the landing plop still ringing when the
+    detector is armed) must not read as a string of bites.
+
+    Every window goes into the history: the median already ignores a splash that fills a
+    tenth of it, and it still follows the ambience when that genuinely gets louder (rain, a
+    noisier spot). Excluding "loud" windows instead would leave the floor unlearnable
+    whenever the session starts above ``floor_min_dbfs`` — a dead detector.
+    Because levels are relative, Windows and in-game volume do not move the threshold —
+    except at the bottom, where ``floor_min_dbfs`` stops digital silence from making every
+    sound look infinitely loud.
+
+    Firing is gated by :meth:`arm`/:meth:`disarm`. The state machine arms it once the
+    bobber has landed (the landing plop is a splash too) and disarms it after the hook.
+    The detector keeps measuring while disarmed so the floor is always current.
+
+    Chunks may be any size; they are re-cut into fixed windows internally. A jump in chunk
+    timestamps (dropped audio) restarts the window rather than splicing across the hole.
+    """
+
+    def __init__(self, config: AudioDetectorConfig, sample_rate: int) -> None:
+        if config.use_template:
+            msg = "template matching is not implemented yet; it needs recorded fixtures first"
+            raise ValueError(msg)
+        self.config = config
+        self.sample_rate = sample_rate
+        self.window = max(32, int(sample_rate * config.chunk_ms / 1000))
+        self._taper = np.hanning(self.window).astype(np.float32)
+        # Hann loses energy; scale so a full-scale in-band sine still reads ~0.707 RMS.
+        self._taper_gain = float(np.sqrt(np.mean(self._taper**2)))
+        freqs = np.fft.rfftfreq(self.window, d=1.0 / sample_rate)
+        low, high = config.band_hz
+        self._band = (freqs >= low) & (freqs <= high)
+
+        history = max(WARMUP_WINDOWS, int(config.noise_window_s * 1000 / config.chunk_ms))
+        self._history: deque[float] = deque(maxlen=history)
+        self._min_floor = from_dbfs(config.floor_min_dbfs)
+        self._min_gap = config.min_gap_ms / 1000.0
+
+        self._buffer = np.zeros(0, dtype=np.float32)
+        self._buffer_t = 0.0
+        self._armed = False
+        self._last_fire = -math.inf
+        self._was_loud = False
+        self.last: DetectorLevel | None = None
+
+    # -- gating ------------------------------------------------------------------------
+
+    @property
+    def armed(self) -> bool:
+        return self._armed
+
+    def arm(self) -> None:
+        self._armed = True
+
+    def disarm(self) -> None:
+        self._armed = False
+
+    def reset(self) -> None:
+        """Forget everything, including the noise floor. For a new session, not a new cast."""
+        self._history.clear()
+        self._buffer = np.zeros(0, dtype=np.float32)
+        self._last_fire = -math.inf
+        self._was_loud = False
+        self.last = None
+
+    # -- data --------------------------------------------------------------------------
+
+    def feed(self, chunk: AudioChunk) -> BiteEvent | None:
+        """Consume a chunk; return the first bite it completes, if any."""
+        mono = chunk.mono()
+        if mono.size == 0:
+            return None
+
+        expected = self._buffer_t + self._buffer.size / self.sample_rate
+        if self._buffer.size == 0 or abs(chunk.t - expected) > self.window / self.sample_rate:
+            # First chunk, or audio went missing: start a fresh window at this chunk.
+            self._buffer = mono
+            self._buffer_t = chunk.t
+        else:
+            self._buffer = np.concatenate([self._buffer, mono])
+
+        event: BiteEvent | None = None
+        while self._buffer.size >= self.window:
+            block = self._buffer[: self.window]
+            self._buffer = self._buffer[self.window :]
+            end_t = self._buffer_t + self.window / self.sample_rate
+            self._buffer_t = end_t
+            fired = self._analyse(block, end_t)
+            if event is None:
+                event = fired
+        return event
+
+    def _analyse(self, block: np.ndarray, end_t: float) -> BiteEvent | None:
+        spectrum = np.fft.rfft(block * self._taper)
+        # Parseval: band energy back to an RMS in the same units as the samples.
+        power = float(np.sum(np.abs(spectrum[self._band]) ** 2)) * 2.0 / (self.window**2)
+        level = math.sqrt(power) / self._taper_gain
+
+        warm = len(self._history) >= WARMUP_WINDOWS
+        floor = float(np.median(self._history)) if self._history else self._min_floor
+        floor = max(floor, self._min_floor)
+        ratio = level / floor
+        loud = ratio >= self.config.trigger_ratio
+
+        self.last = DetectorLevel(
+            t=end_t,
+            level_db=to_dbfs(level),
+            floor_db=to_dbfs(floor),
+            threshold_db=to_dbfs(floor * self.config.trigger_ratio),
+            armed=self._armed,
+        )
+
+        # Judge against the floor *before* this window, then let it inform the next one.
+        self._history.append(level)
+        onset = loud and not self._was_loud
+        self._was_loud = loud
+
+        if not onset:
+            return None
+        if not (self._armed and warm and end_t - self._last_fire >= self._min_gap):
+            return None
+
+        self._last_fire = end_t
+        return BiteEvent(t=end_t, level_db=to_dbfs(level), floor_db=to_dbfs(floor), ratio=ratio)

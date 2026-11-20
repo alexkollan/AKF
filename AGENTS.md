@@ -37,8 +37,10 @@ grind-bot features now.
 engine/
   capture.py        dxcam/mss, WoW window + monitor discovery, DPI aware
   input.py          SendInput scancodes, mouse move/click, window focus
-  audio.py          WASAPI loopback stream, splash detector
+  audio.py          endpoint loopback stream, source selection, splash detector
+  audio_process.py  process loopback: capture Wow.exe audio only (COM, Windows 11)
   clips.py          recorded-clip format: writer, loader, frame reader, cast segments
+  clock.py          the one high-resolution clock (QPC) everything is stamped with
   vision/bobber.py  find bobber: HSV mask + template + blob scoring
   vision/bite.py    bite: drop/disappear/motion in ROI
   fsm.py            fishing state machine, modes A/B/C
@@ -49,7 +51,9 @@ engine/
 ui/                 Vite + React + TS
 tools/
   record_clip.py    records frames + audio of real casts
-  replay.py         runs detectors on recorded clips
+  replay.py         plays clips, edits markers, --metrics/--sweep score the detector
+  metrics.py        per-cast scoring of the bite detector against markers (M3)
+  listen.py         live splash detector: prints BITE while you fish by hand
   spike.py          hardware smoke test (capture + input) against a live client
 tests/fixtures/     recorded clips, labelled
 docs/PLAN.md        the specification; milestones M0-M7
@@ -65,6 +69,8 @@ uv run ruff format .         # format
 uv run python -m tools.spike # capture + input smoke test, needs WoW running
 uv run python -m tools.record_clip --name <spot> --tags night,sea  # record fixtures
 uv run python -m tools.replay [clip]  # list fixtures, or play one with markers
+uv run python -m tools.replay --metrics   # score the bite detector on all fixtures
+uv run python -m tools.listen  # live bite detection on WoW audio, nothing sent to the game
 npm --prefix ui run dev      # UI dev server on http://localhost:5173
 npm --prefix ui run build    # typecheck + production build
 ```
@@ -97,12 +103,31 @@ makes the detection testable:
 a lossy codec corrupts. Load clips through `engine.clips`, never by reading the files directly.
 Media files are git-ignored (they run to hundreds of MB); move to Git LFS if they need sharing.
 
-**Audio timing.** WASAPI loopback delivers *nothing* while nothing plays — no callbacks, no
-zero buffers. Chunk timestamps therefore follow the sample count while audio flows and
-re-anchor to the wall clock after a gap (`engine.audio.stamp_chunk`), and anything that writes
-audio places it by timestamp (`ClipWriter.add_audio(..., at=t)`). Never derive time from
-"samples received so far". The captured level also follows the Windows output volume, so
-detectors must work on ratios to a noise floor, never on absolute amplitude.
+**Clock.** Everything that gets compared in time — frames, audio chunks, markers, input
+actions — is stamped with `engine.clock.now()` (`perf_counter`, QPC, 100 ns). On Windows
+`time.monotonic()` is `GetTickCount64` with 15.6 ms steps; never use it, or `time.time()`, for
+anything timed. WASAPI packet timestamps are QPC too (`clock.from_qpc`), so audio, video and
+hotkeys share one timeline.
+
+**Audio source.** The default is **process loopback** (`engine.audio_process`): it captures
+`Wow.exe` alone, so Discord, music or a browser can never fake a bite. It is driven through COM
+with `comtypes` on its own MTA thread, and its chunks carry exact QPC capture times.
+`engine.audio.open_audio_source(pid)` picks it and falls back to **endpoint loopback**
+(`LoopbackStream`, everything the device plays) only when unavailable or asked for.
+
+**Audio timing on the endpoint fallback.** Endpoint loopback delivers *nothing* while nothing
+plays — no callbacks, no zero buffers. Its chunk timestamps follow the sample count while audio
+flows and re-anchor to the clock after a gap (`engine.audio.stamp_chunk`), and anything that
+writes audio places it by timestamp (`ClipWriter.add_audio(..., at=t)`). Never derive time from
+"samples received so far". Its level also follows the Windows volume; process loopback does
+not, but it delivers true digital silence between sounds. Either way, detectors work on ratios
+to a noise floor with a floor clamp (`floor_min_dbfs`), never on absolute amplitude.
+
+**Bite detection.** `SplashDetector` fires on the rising edge of in-band RMS over a rolling
+median floor, only while armed. The state machine arms it after the bobber has landed and
+disarms it at the first detection. Every window feeds the median (excluding loud ones once made
+the floor unlearnable); tune `trigger_ratio` from fixtures with `tools.replay --sweep`, not by
+feel.
 
 **Coordinates.** All geometry is relative to the WoW *client area*, in physical pixels. The
 process is per-monitor DPI aware (`SetProcessDpiAwarenessContext`), so two monitors with

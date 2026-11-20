@@ -105,7 +105,7 @@ BLUE_FEATHER_PRESET: tuple[HsvRange, ...] = (HsvRange(h_min=95, h_max=125, s_min
 class KeyBindings(Model):
     """In-game keys the engine presses. Names are the ones `engine.input` understands."""
 
-    fish_key: str = "8"  # mode A: cast and hook with the addon key
+    fish_key: str = "]"  # mode A: cast and hook with the one-button addon key
     cast_key: str = "9"  # modes B and C: start the cast
     interact_key: str = "f"  # mode C: soft-target interact
 
@@ -120,7 +120,7 @@ class MouseOptions(Model):
 class CaptureConfig(Model):
     backend: CaptureBackend = CaptureBackend.AUTO
     target_fps: Annotated[int, Field(ge=10, le=240)] = 60
-    process_name: str = "WowClassic.exe"
+    process_name: str = "Wow.exe"  # WoW Forever runs on the Mainline client
     window_title_contains: str = ""  # extra filter when several clients run
 
 
@@ -135,14 +135,28 @@ class TimingConfig(Model):
 
 
 class AudioDetectorConfig(Model):
-    device_index: int | None = None  # None: default render device, loopback
-    chunk_ms: Annotated[int, Field(ge=5, le=100)] = 20
+    #: Capture only Wow.exe (Windows 11 process loopback). Off: hear the whole output device.
+    process_loopback: bool = True
+    device_index: int | None = None  # endpoint fallback; None: the default output device
+    chunk_ms: Annotated[int, Field(ge=5, le=100)] = 20  # analysis window
     noise_window_s: Annotated[float, Field(ge=0.5, le=30.0)] = 4.0
-    trigger_ratio: Annotated[float, Field(ge=1.1, le=20.0)] = 3.5  # energy / noise floor
+    trigger_ratio: Annotated[float, Field(ge=1.1, le=20.0)] = 3.5  # band RMS / noise floor
+    #: The floor never counts as quieter than this. Process loopback delivers true digital
+    #: silence between sounds, and a ratio over silence would fire on anything at all.
+    floor_min_dbfs: Annotated[float, Field(ge=-120.0, le=0.0)] = -60.0
     min_gap_ms: Annotated[int, Field(ge=50, le=5000)] = 700  # refractory period
-    use_template: bool = False  # cross-correlate against a recorded splash
+    use_template: bool = False  # cross-correlate against a recorded splash (needs fixtures)
     template_path: str | None = None
     band_hz: tuple[int, int] = (300, 4000)
+
+    @field_validator("band_hz")
+    @classmethod
+    def _band_is_ordered(cls, value: tuple[int, int]) -> tuple[int, int]:
+        low, high = value
+        if not 0 <= low < high <= 24000:
+            msg = f"band_hz must be 0 <= low < high <= 24000, got {value}"
+            raise ValueError(msg)
+        return value
 
 
 class PixelDetectorConfig(Model):

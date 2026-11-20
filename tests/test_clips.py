@@ -64,7 +64,7 @@ def clip(tmp_path, request):
             roi_screen=(100, 100, 100 + WIDTH, 100 + HEIGHT),
             roi_fraction=RoiFraction(),
             monitor_device="\\\\.\\DISPLAY1",
-            process_name="WowClassic.exe",
+            process_name="Wow.exe",
         ),
         tags=["night", "sea"],
         notes="synthetic",
@@ -88,7 +88,7 @@ def test_meta_round_trip(clip):
     assert clip.meta.audio.channels == CHANNELS
     assert clip.meta.audio.start_offset == pytest.approx(0.02)
     assert clip.meta.tags == ["night", "sea"]
-    assert clip.meta.geometry.process_name == "WowClassic.exe"
+    assert clip.meta.geometry.process_name == "Wow.exe"
     assert clip.meta.duration == pytest.approx((FRAMES - 1) / FPS)
 
 
