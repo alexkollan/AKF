@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+*.spec
+
+# Node / UI
+node_modules/
+ui/dist/
+ui/.vite/
+
+# Runtime output
+out/
+*.log
+
+# Recorded clips are large; keep only the ones that are committed on purpose
+tests/fixtures/*/frames/
+tests/fixtures/*/*.mp4
+tests/fixtures/*/*.mkv
+tests/fixtures/*/*.wav
