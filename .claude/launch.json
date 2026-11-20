@@ -4,13 +4,36 @@
     {
       "name": "ui",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "ui"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "ui"
+      ],
       "port": 5173
     },
     {
       "name": "engine",
       "runtimeExecutable": "uv",
-      "runtimeArgs": ["run", "python", "-m", "engine.server"],
+      "runtimeArgs": [
+        "run",
+        "python",
+        "-m",
+        "engine.server"
+      ],
+      "port": 8777
+    },
+    {
+      "name": "engine-sim",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": [
+        "run",
+        "python",
+        "-m",
+        "engine.server",
+        "--simulate",
+        "--no-hotkeys"
+      ],
       "port": 8777
     }
   ]

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import type {
+  AudioDevice,
   CatchRecord,
   DetectorLevels,
   EngineState,
@@ -33,6 +34,14 @@ interface RoiImage {
   box: [number, number, number, number] | null;
 }
 
+interface ClientShot {
+  pngBase64: string;
+  width: number;
+  height: number;
+  clientWidth: number;
+  clientHeight: number;
+}
+
 interface EngineStore {
   connected: boolean;
   status: RunStatus;
@@ -45,6 +54,10 @@ interface EngineStore {
   roi: RoiImage | null;
   profile: Record<string, unknown> | null;
   settings: Record<string, unknown> | null;
+  defaults: { profile: Record<string, unknown>; settings: Record<string, unknown> } | null;
+  lureRemainingS: number | null;
+  audioDevices: AudioDevice[];
+  clientShot: ClientShot | null;
   profiles: { names: string[]; active: string };
   lastError: { message: string; command: string | null; at: number } | null;
 
@@ -65,6 +78,10 @@ export const useEngineStore = create<EngineStore>((set) => ({
   roi: null,
   profile: null,
   settings: null,
+  defaults: null,
+  lureRemainingS: null,
+  audioDevices: [],
+  clientShot: null,
   profiles: { names: [], active: "" },
   lastError: null,
 
@@ -76,7 +93,7 @@ export const useEngineStore = create<EngineStore>((set) => ({
         case "state":
           return { status: event.status, state: event.state, stopReason: event.reason };
         case "stats":
-          return { stats: event.stats };
+          return { stats: event.stats, lureRemainingS: event.lureRemainingS };
         case "levels":
           return { levels: [...prev.levels, event.levels].slice(-LEVEL_HISTORY) };
         case "log":
@@ -84,7 +101,19 @@ export const useEngineStore = create<EngineStore>((set) => ({
         case "catch":
           return { catches: [...prev.catches, event.record] };
         case "config":
-          return { profile: event.profile, settings: event.settings };
+          return { profile: event.profile, settings: event.settings, defaults: event.defaults };
+        case "audio_devices":
+          return { audioDevices: event.devices };
+        case "client_shot":
+          return {
+            clientShot: {
+              pngBase64: event.pngBase64,
+              width: event.width,
+              height: event.height,
+              clientWidth: event.clientWidth,
+              clientHeight: event.clientHeight,
+            },
+          };
         case "profiles":
           return { profiles: { names: event.names, active: event.active } };
         case "roi":

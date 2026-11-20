@@ -65,11 +65,17 @@ export interface CatchRecord {
 /** Events the engine pushes to every connected client. */
 export type ServerEvent =
   | { type: "state"; status: RunStatus; state: EngineState; reason: string | null }
-  | { type: "stats"; stats: SessionStats }
+  | { type: "stats"; stats: SessionStats; lureRemainingS: number | null }
   | { type: "levels"; levels: DetectorLevels }
   | { type: "log"; line: LogLine }
   | { type: "catch"; record: CatchRecord }
-  | { type: "config"; profile: Record<string, unknown>; settings: Record<string, unknown> }
+  | {
+      type: "config";
+      profile: Record<string, unknown>;
+      settings: Record<string, unknown>;
+      /** Factory values, for "Reset to defaults". */
+      defaults: { profile: Record<string, unknown>; settings: Record<string, unknown> };
+    }
   | { type: "profiles"; names: string[]; active: string }
   | {
       type: "roi";
@@ -78,7 +84,24 @@ export type ServerEvent =
       height: number;
       box: [number, number, number, number] | null;
     }
+  | { type: "audio_devices"; devices: AudioDevice[] }
+  | {
+      type: "client_shot";
+      pngBase64: string;
+      width: number;
+      height: number;
+      clientWidth: number;
+      clientHeight: number;
+    }
   | { type: "error"; message: string; command: string | null };
+
+export interface AudioDevice {
+  index: number;
+  name: string;
+  channels: number;
+  sampleRate: number;
+  isDefault: boolean;
+}
 
 /** Commands the UI sends. The global hotkeys call the same engine methods. */
 export type ClientCommand =
@@ -97,4 +120,10 @@ export type ClientCommand =
   /** Without a name, saves the active profile; with one, saves it under that name. */
   | { type: "save_profile"; name?: string }
   | { type: "list_profiles" }
-  | { type: "screenshot_roi" };
+  | { type: "screenshot_roi" }
+  /** The whole client, downscaled: canvas for the ROI editor and the eyedropper. */
+  | { type: "screenshot_client" }
+  /** Replace the active profile with a full profile JSON (from a file) and save it. */
+  | { type: "import_profile"; profile: Record<string, unknown> }
+  | { type: "delete_profile"; name: string }
+  | { type: "list_audio_devices" };

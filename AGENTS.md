@@ -46,6 +46,7 @@ engine/
   fsm.py            fishing state machine, modes A/B/C (pure: time and signals come in)
   session.py        wires the FSM to audio, input and focus (or a simulated world)
   run.py            headless CLI: python -m engine.run [--dry-run] [--simulate --fast]
+  app.py            desktop app: server + pywebview window on the remembered monitor
   hotkeys.py        global hotkeys that are swallowed before they reach WoW
   lures.py          lure timer + apply sequence
   config.py         pydantic models, profiles (JSON)
@@ -53,7 +54,7 @@ engine/
   controller.py     single point of control: sessions, profiles, settings, event queue
   protocol.py       WebSocket wire format (pydantic), mirrored by ui/src/lib/protocol.ts
   server.py         FastAPI + one WebSocket on 127.0.0.1:8777, global hotkeys
-ui/                 Vite + React + TS
+ui/                 Vite + React + TS: screens/, components/ (ui/ = shadcn), lib/, store/
 tools/
   record_clip.py    records frames + audio of real casts
   replay.py         plays clips, edits markers, --metrics/--sweep score the detector
@@ -82,6 +83,8 @@ uv run python -m engine.run --simulate --fast --minutes 30  # no game, half an h
 uv run python -m engine.server  # engine service for the UI: ws://127.0.0.1:8777/ws, F9/F10/F12
 npm --prefix ui run dev      # UI dev server on http://localhost:5173
 npm --prefix ui run build    # typecheck + production build
+uv run python -m engine.app  # the desktop app (needs the UI built); --dev uses Vite, --simulate no game
+uv run python -m engine.server --simulate --no-hotkeys  # engine for UI work, game closed
 ```
 
 `uv run` is the only supported way to run Python here: there is no global interpreter on
@@ -170,7 +173,22 @@ silently ignored key.
 
 ## UI conventions
 
-- Tokens in `ui/src/index.css` follow shadcn/ui names, so its components drop in unchanged.
+- Look: night water. Tokens in `ui/src/index.css` keep shadcn/ui names but carry the palette
+  (abyss, depth, shoal, foam, mist, lagoon); Archivo Variable with its width axis does the
+  typographic work (condensed numerals, expanded state words). Lagoon teal is the only accent;
+  red is never decoration.
+- Components: shadcn/ui, style `base-nova`, which sits on Base UI, not Radix. Add more with
+  `npx shadcn@latest add <name>` from `ui/`, then check them: the generated `data-horizontal:`
+  variants did not match Base UI 1.9's `data-orientation` attribute (sliders had zero width)
+  and were rewritten to `data-[orientation=…]:`.
+- `ui/src/lib/config.ts` is the TypeScript view of `engine/config.py`; keep it in step. Every
+  settings field goes through `components/fields.tsx` (`Field` gives the tooltip with help and
+  default, plus a mark when changed; `Section` gives "Reset to defaults" from the engine's
+  `defaults`). Copy is plain language from the player's side, sentence case.
+- Effects are always block-bodied. `scrollIntoView` now returns a Promise in Chromium, and an
+  expression-bodied `useEffect` returning it crashed the whole tree on unmount.
+- `npm run build` is `tsc -b && vite build`. Plain `tsc` checks nothing here (the root
+  tsconfig only holds references), which hid type errors until M6.
 - The WebSocket contract lives twice: `engine/protocol.py` (pydantic, validated) and
   `ui/src/lib/protocol.ts` (types). They mirror each other field for field — camelCase on the
   wire, except `profile`/`settings` payloads, which keep the config models' snake_case. Change

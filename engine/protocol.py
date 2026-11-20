@@ -95,6 +95,28 @@ class ScreenshotRoi(Wire):
     type: Literal["screenshot_roi"]
 
 
+class ScreenshotClient(Wire):
+    """The whole WoW client, downscaled: the canvas for the ROI editor and the eyedropper."""
+
+    type: Literal["screenshot_client"]
+
+
+class ImportProfile(Wire):
+    """Replace the active profile with ``profile`` (a full profile JSON) and save it."""
+
+    type: Literal["import_profile"]
+    profile: dict[str, Any]
+
+
+class DeleteProfile(Wire):
+    type: Literal["delete_profile"]
+    name: str
+
+
+class ListAudioDevices(Wire):
+    type: Literal["list_audio_devices"]
+
+
 Command = Annotated[
     Start
     | Pause
@@ -108,7 +130,11 @@ Command = Annotated[
     | LoadProfile
     | SaveProfile
     | ListProfiles
-    | ScreenshotRoi,
+    | ScreenshotRoi
+    | ScreenshotClient
+    | ImportProfile
+    | DeleteProfile
+    | ListAudioDevices,
     Field(discriminator="type"),
 ]
 
@@ -135,6 +161,8 @@ class StateEvent(Wire):
 class StatsEvent(Wire):
     type: Literal["stats"] = "stats"
     stats: StatsSnapshot
+    #: Seconds left on the active lure; ``None`` when no lure is on.
+    lure_remaining_s: float | None = None
 
 
 class Levels(Wire):
@@ -180,6 +208,32 @@ class ConfigEvent(Wire):
     type: Literal["config"] = "config"
     profile: dict[str, Any]
     settings: dict[str, Any]
+    #: Factory values, so every screen can offer "Reset to defaults" without a copy of them.
+    defaults: dict[str, Any]
+
+
+class AudioDevice(Wire):
+    index: int
+    name: str
+    channels: int
+    sample_rate: int
+    is_default: bool
+
+
+class AudioDevicesEvent(Wire):
+    type: Literal["audio_devices"] = "audio_devices"
+    devices: list[AudioDevice]
+
+
+class ClientShotEvent(Wire):
+    """The WoW client area as a PNG, at most ``CLIENT_SHOT_MAX_WIDTH`` wide."""
+
+    type: Literal["client_shot"] = "client_shot"
+    png_base64: str
+    width: int
+    height: int
+    client_width: int
+    client_height: int
 
 
 class ProfilesEvent(Wire):
@@ -211,5 +265,7 @@ Event = (
     | ConfigEvent
     | ProfilesEvent
     | RoiEvent
+    | AudioDevicesEvent
+    | ClientShotEvent
     | ErrorEvent
 )

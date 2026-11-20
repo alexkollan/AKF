@@ -17,6 +17,8 @@ export default defineConfig({
   build: {
     // pywebview loads the built UI from disk via the engine, so keep paths relative.
     outDir: "dist",
+    // A desktop app loading from local disk: one 700 kB bundle costs nothing worth splitting.
+    chunkSizeWarningLimit: 1500,
     emptyOutDir: true,
   },
 });

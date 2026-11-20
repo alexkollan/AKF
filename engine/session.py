@@ -124,6 +124,7 @@ class SimulatedWorld:
     def __post_init__(self) -> None:
         self._seen_cast: float | None = None
         self._bite_at: float | None = None
+        self._splash_at = float("-inf")
         self._located = False
 
     def poll(self, fsm: FishingFSM, now: float) -> Signals:
@@ -140,6 +141,7 @@ class SimulatedWorld:
         bite = None
         if self._bite_at is not None and now >= self._bite_at and fsm.listening(now):
             bite = BiteSignal(t=self._bite_at, strength_db=15.0, source="simulated")
+            self._splash_at = self._bite_at
             self._bite_at = None
 
         bobber = None
@@ -148,6 +150,20 @@ class SimulatedWorld:
             if self.rng.random() < self.locate_probability:
                 bobber = self.bobber
         return Signals(bite=bite, bobber=bobber)
+
+    def level(self, now: float, armed: bool) -> audio_mod.DetectorLevel:
+        """What the detector chart would show: ambience near -63 dBFS, splashes near -32.
+
+        Shaped after the live session, so the UI can be built and checked without WoW.
+        """
+        floor = -63.0
+        level = floor + self.rng.gauss(0.0, 2.0)
+        since_splash = now - self._splash_at
+        if 0.0 <= since_splash < 1.2:
+            level = -30.0 - 12.0 * since_splash + self.rng.gauss(0.0, 2.5)
+        return audio_mod.DetectorLevel(
+            t=now, level_db=level, floor_db=floor, threshold_db=floor + 10.9, armed=armed
+        )
 
 
 # --------------------------------------------------------------------------------------
@@ -254,6 +270,8 @@ class Session:
 
                 if world is not None:
                     signals = world.poll(self.fsm, now)
+                    if self.on_levels is not None:
+                        self._emit_levels(world.level(now, self.fsm.listening(now)), now)
                 else:
                     assert bites is not None and self.window is not None
                     bite = bites.poll(self.fsm.listening(now))

@@ -1,6 +1,7 @@
 """The engine as a local service: one WebSocket for the UI, global hotkeys for the keyboard.
 
-    uv run python -m engine.server          # ws://127.0.0.1:8777/ws
+    uv run python -m engine.server             # ws://127.0.0.1:8777/ws
+    uv run python -m engine.server --simulate  # no game: Start runs a simulated session
 
 Commands arrive as JSON frames (``engine.protocol``) and go to the
 :class:`~engine.controller.Controller`; its events are broadcast to every connected client.
@@ -18,14 +19,17 @@ Origin at all — a local script, not a web page).
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import contextlib
 import logging
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from engine import capture
@@ -33,6 +37,7 @@ from engine import config as cfg
 from engine import protocol as proto
 from engine.controller import Controller
 from engine.hotkeys import SwallowingHotkeys
+from engine.session import Session
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +45,8 @@ PUMP_INTERVAL_S = 0.05
 STATS_INTERVAL_S = 1.0
 UI_DEV_PORT = 5173
 POLICY_VIOLATION = 1008
+#: `npm --prefix ui run build` output, served at / for the desktop window.
+UI_DIST = Path(__file__).resolve().parents[1] / "ui" / "dist"
 
 
 def allowed_origins(port: int) -> set[str]:
@@ -133,12 +140,21 @@ async def handle(controller: Controller, command: proto.Command) -> None:
             await asyncio.to_thread(controller.list_profiles)
         case proto.ScreenshotRoi():
             await asyncio.to_thread(controller.screenshot_roi)
+        case proto.ScreenshotClient():
+            await asyncio.to_thread(controller.screenshot_client)
+        case proto.ImportProfile(profile=profile):
+            await asyncio.to_thread(controller.import_profile, profile)
+        case proto.DeleteProfile(name=name):
+            await asyncio.to_thread(controller.delete_profile, name)
+        case proto.ListAudioDevices():
+            await asyncio.to_thread(controller.list_audio_devices)
 
 
 def create_app(
     controller: Controller | None = None,
     *,
     enable_hotkeys: bool = True,
+    ui_dist: Path | None = UI_DIST,
 ) -> FastAPI:
     controller = controller or Controller()
     hub = Hub(controller)
@@ -190,6 +206,10 @@ def create_app(
         finally:
             hub.clients.discard(ws)
 
+    # The built UI, for the desktop window. Mounted last so /ws and /health win.
+    if ui_dist is not None and (ui_dist / "index.html").is_file():
+        app.mount("/", StaticFiles(directory=ui_dist, html=True), name="ui")
+
     return app
 
 
@@ -210,13 +230,32 @@ def _short(exc: ValidationError) -> str:
     return f"{where}: {first.get('msg', 'invalid')}" if where else str(first.get("msg"))
 
 
-def main() -> None:
+def simulated_sessions(profile: cfg.Profile, **kwargs: Any) -> Session:
+    """Sessions against a simulated world: the whole UI works with the game closed."""
+    kwargs.pop("dry_run", None)
+    return Session(profile, simulate=True, **kwargs)
+
+
+def build_controller(*, simulate: bool = False, dry_run: bool = False) -> Controller:
+    controller = Controller(session_factory=simulated_sessions if simulate else Session)
+    if dry_run:  # this run only; the saved settings keep their own value
+        controller.settings = controller.settings.model_copy(update={"dry_run": True})
+    return controller
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="engine.server", description=__doc__)
+    parser.add_argument("--simulate", action="store_true", help="no game: simulated sessions")
+    parser.add_argument("--dry-run", action="store_true", help="log keys instead of pressing")
+    parser.add_argument("--no-hotkeys", action="store_true", help="do not grab F9/F10/F12")
+    args = parser.parse_args(argv)
+
     logging.basicConfig(level=logging.INFO, format="%(levelname)-7s %(name)s: %(message)s")
-    settings = cfg.load_settings()
+    controller = build_controller(simulate=args.simulate, dry_run=args.dry_run)
     uvicorn.run(
-        create_app(),
-        host=settings.server_host,
-        port=settings.server_port,
+        create_app(controller, enable_hotkeys=not args.no_hotkeys),
+        host=controller.settings.server_host,
+        port=controller.settings.server_port,
         log_level="info",
     )
 

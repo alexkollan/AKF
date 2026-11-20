@@ -338,6 +338,14 @@ def save_profile(profile: Profile) -> Path:
     return path
 
 
+def delete_profile(name: str) -> None:
+    path = profiles_dir() / profile_filename(name)
+    if not path.is_file():
+        msg = f"no saved profile named {name!r}"
+        raise FileNotFoundError(msg)
+    path.unlink()
+
+
 def load_settings() -> Settings:
     path = config_dir() / "settings.json"
     if not path.is_file():

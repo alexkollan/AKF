@@ -1,42 +1,64 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
-/* shadcn/ui-compatible token names so its components drop in unchanged in M6. */
+/* shadcn/ui token names, so its components drop in unchanged. */
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Night water. The base is a deep blue-green rather than neutral black, the one accent is
+ * a lagoon teal for everything you can press, and the four state colours keep one meaning
+ * each: green running, amber paused, red stopped or error, grey idle. Red is never used as
+ * decoration, so it always means "look here".
+ */
 :root {
-  --radius: 0.625rem;
+  --radius: 0.5rem;
 
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.72 0.14 195);
-  --primary-foreground: oklch(0.16 0.02 195);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.62 0.21 25);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.72 0.14 195);
+  --abyss: #0e1a21;
+  --depth: #14252e;
+  --depth-raised: #1a2f3a;
+  --shoal: #2a3f4a;
+  --foam: #e4ecea;
+  --mist: #8fa3a8;
+  --lagoon: #3fb8bf;
 
-  /* Engine state colours: green runs, amber paused, red stopped/error, grey idle. */
-  --state-running: oklch(0.72 0.17 150);
-  --state-paused: oklch(0.8 0.15 85);
-  --state-error: oklch(0.62 0.21 25);
-  --state-idle: oklch(0.6 0 0);
+  --background: var(--abyss);
+  --foreground: var(--foam);
+  --card: var(--depth);
+  --card-foreground: var(--foam);
+  --popover: var(--depth-raised);
+  --popover-foreground: var(--foam);
+  --primary: var(--lagoon);
+  --primary-foreground: #06252a;
+  --secondary: var(--depth-raised);
+  --secondary-foreground: var(--foam);
+  --muted: var(--depth-raised);
+  --muted-foreground: var(--mist);
+  --accent: var(--depth-raised);
+  --accent-foreground: var(--foam);
+  --destructive: #f0605a;
+  --destructive-foreground: var(--foam);
+  --border: var(--shoal);
+  --input: var(--shoal);
+  --ring: var(--lagoon);
+
+  --state-running: #3dd68c;
+  --state-paused: #f5b83d;
+  --state-error: #f0605a;
+  --state-idle: #6b7f86;
+
+  /* The detector chart: water below the line, the line itself, a splash. */
+  --chart-water: #1f6f7a;
+  --chart-line: #e4ecea;
+  --chart-splash: #3fb8bf;
 }
 
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
+  --font-sans: "Archivo Variable", "Segoe UI Variable", system-ui, sans-serif;
+
+  --radius-sm: calc(var(--radius) - 3px);
+  --radius-md: calc(var(--radius) - 1px);
   --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -58,6 +80,14 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
+  --color-abyss: var(--abyss);
+  --color-depth: var(--depth);
+  --color-depth-raised: var(--depth-raised);
+  --color-shoal: var(--shoal);
+  --color-foam: var(--foam);
+  --color-mist: var(--mist);
+  --color-lagoon: var(--lagoon);
+
   --color-state-running: var(--state-running);
   --color-state-paused: var(--state-paused);
   --color-state-error: var(--state-error);
@@ -78,8 +108,24 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
-    font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+    font-family: var(--font-sans);
+    font-feature-settings: "tnum" 1;
+    -webkit-font-smoothing: antialiased;
     /* The window is a fixed panel on the second monitor, not a scrolling page. */
     overflow: hidden;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }

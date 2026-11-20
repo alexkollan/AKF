@@ -13,22 +13,28 @@ blocking methods; the server runs them in a worker thread, never on the event lo
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import queue
 import threading
 import time
+import urllib.request
 from collections.abc import Callable
 from typing import Any
 
 import cv2
+import numpy as np
 
 from engine import audio as audio_mod
 from engine import capture, clock
 from engine import config as cfg
 from engine.fsm import FsmEvent, Status
 from engine.protocol import (
+    AudioDevice,
+    AudioDevicesEvent,
     CatchEvent,
     CatchWire,
+    ClientShotEvent,
     ConfigEvent,
     ErrorEvent,
     Event,
@@ -48,6 +54,9 @@ logger = logging.getLogger(__name__)
 
 SessionFactory = Callable[..., Session]
 
+#: The ROI editor does not need more than this; a 3440 px PNG is a slow WebSocket frame.
+CLIENT_SHOT_MAX_WIDTH = 960
+
 
 def deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     """Recursively merge ``patch`` into a copy of ``base``; lists and scalars replace."""
@@ -58,6 +67,34 @@ def deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         else:
             merged[key] = value
     return merged
+
+
+#: State reasons that are worth a notification: the bot stopped or paused by itself.
+NOTIFY_PREFIXES = ("Stopped:", "WoW lost focus", "crashed", "emergency stop")
+WEBHOOK_TIMEOUT_S = 5.0
+
+
+def post_json(url: str, payload: dict[str, Any]) -> None:
+    """POST a JSON body; failures are logged, never raised."""
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", "User-Agent": "fishbot"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=WEBHOOK_TIMEOUT_S):
+            pass
+    except OSError as exc:
+        logger.warning("webhook notification failed: %s", exc)
+
+
+def _png_base64(frame: np.ndarray) -> str:
+    ok, png = cv2.imencode(".png", frame)
+    if not ok:
+        msg = "could not encode the screenshot"
+        raise capture.CaptureError(msg)
+    return base64.b64encode(png.tobytes()).decode("ascii")
 
 
 def epoch_ms(t: float) -> float:
@@ -120,8 +157,14 @@ class Controller:
     def stats_event(self) -> StatsEvent:
         with self._lock:
             session = self._session
-        stats = session.stats if session is not None else self._last_stats
-        return StatsEvent(stats=stats.snapshot(clock.now()))
+        now = clock.now()
+        if session is None:
+            return StatsEvent(stats=self._last_stats.snapshot(now))
+        remaining = session.fsm.lures.remaining(now)
+        return StatsEvent(
+            stats=session.stats.snapshot(now),
+            lure_remaining_s=round(remaining, 1) if remaining is not None else None,
+        )
 
     # ==================================================================================
     # session control
@@ -239,18 +282,83 @@ class Controller:
         self._push(self._config_event())
         self._push(self._profiles_event())
 
+    def import_profile(self, payload: dict[str, Any]) -> None:
+        """Replace the active profile with an imported one, and keep it."""
+        profile = cfg.Profile.model_validate(payload)  # raises on anything malformed
+        with self._lock:
+            self.profile = profile
+            session = self._session
+        if session is not None:
+            session.request("update_profile", profile)
+        self.save_profile()
+
+    def delete_profile(self, name: str) -> None:
+        """Remove a saved profile. The active one stays loaded until something replaces it."""
+        if self.persist:
+            cfg.delete_profile(name)
+        self._push(self._profiles_event())
+
+    def list_audio_devices(self) -> None:
+        devices = audio_mod.list_loopback_devices()
+        self._push(
+            AudioDevicesEvent(
+                devices=[
+                    AudioDevice(
+                        index=device.index,
+                        name=device.name,
+                        channels=device.channels,
+                        sample_rate=device.sample_rate,
+                        is_default=device.is_default,
+                    )
+                    for device in devices
+                ]
+            )
+        )
+
     # ==================================================================================
     # screen
     # ==================================================================================
 
+    def screenshot_client(self) -> ClientShotEvent:
+        """The WoW client area, downscaled, for the ROI editor. Blocking: call off-loop."""
+        window = self._game_window()
+        frame = self._grab(window.client_rect, window)
+        height, width = frame.shape[:2]
+        scale = min(1.0, CLIENT_SHOT_MAX_WIDTH / width)
+        if scale < 1.0:
+            frame = cv2.resize(
+                frame, (round(width * scale), round(height * scale)), interpolation=cv2.INTER_AREA
+            )
+        event = ClientShotEvent(
+            png_base64=_png_base64(frame),
+            width=int(frame.shape[1]),
+            height=int(frame.shape[0]),
+            client_width=width,
+            client_height=height,
+        )
+        self._push(event)
+        return event
+
     def screenshot_roi(self) -> RoiEvent:
         """The search ROI as a PNG, for the Detection screen. Blocking: call off-loop."""
-        window = capture.find_game_window(
+        window = self._game_window()
+        frame = self._grab(window.roi(self.profile.detection.search_roi), window)
+        event = RoiEvent(
+            png_base64=_png_base64(frame),
+            width=int(frame.shape[1]),
+            height=int(frame.shape[0]),
+        )
+        self._push(event)
+        return event
+
+    def _game_window(self) -> capture.WindowInfo:
+        return capture.find_game_window(
             self.profile.capture.process_name, self.profile.capture.window_title_contains
         )
-        roi = window.roi(self.profile.detection.search_roi)
+
+    def _grab(self, region: capture.Rect, window: capture.WindowInfo) -> np.ndarray:
         with capture.capture_session(
-            roi, window.monitor, backend=self.profile.capture.backend
+            region, window.monitor, backend=self.profile.capture.backend
         ) as source:
             deadline = clock.now() + 2.0
             frame = None
@@ -259,17 +367,7 @@ class Controller:
         if frame is None:
             msg = "no frame arrived from the capture backend"
             raise capture.CaptureError(msg)
-        ok, png = cv2.imencode(".png", frame)
-        if not ok:
-            msg = "could not encode the ROI screenshot"
-            raise capture.CaptureError(msg)
-        event = RoiEvent(
-            png_base64=base64.b64encode(png.tobytes()).decode("ascii"),
-            width=int(frame.shape[1]),
-            height=int(frame.shape[0]),
-        )
-        self._push(event)
-        return event
+        return frame
 
     def report_error(self, message: str, command: str | None = None) -> None:
         self._push(ErrorEvent(message=message, command=command))
@@ -362,6 +460,10 @@ class Controller:
         return ConfigEvent(
             profile=self.profile.model_dump(mode="json"),
             settings=self.settings.model_dump(mode="json"),
+            defaults={
+                "profile": cfg.Profile().model_dump(mode="json"),
+                "settings": cfg.Settings().model_dump(mode="json"),
+            },
         )
 
     def _profiles_event(self) -> ProfilesEvent:
@@ -371,6 +473,29 @@ class Controller:
     def _push_state(self, event: StateEvent) -> None:
         self._last_state = event
         self._push(event)
+        if event.reason and event.reason.startswith(NOTIFY_PREFIXES):
+            self._notify(event)
+
+    def _notify(self, event: StateEvent) -> None:
+        """Tell the user the bot stopped on its own, via the configured webhook.
+
+        Runs on its own short-lived thread: a slow or dead webhook must never hold up the
+        session thread that reported the stop.
+        """
+        url = self.settings.notifications.webhook_url
+        if not url:
+            return
+        message = f"Fishbot {event.status}: {event.reason}"
+        stats = self.stats_event().stats
+        payload = {
+            "content": message,  # Discord
+            "text": message,  # Slack-style and most automation tools
+            "status": event.status,
+            "reason": event.reason,
+            "catches": stats.catches,
+            "casts": stats.casts,
+        }
+        threading.Thread(target=post_json, args=(url, payload), daemon=True).start()
 
     def _push(self, event: Event) -> None:
         self._events.put(event)
