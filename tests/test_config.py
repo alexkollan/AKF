@@ -11,6 +11,12 @@ def test_defaults_are_valid():
     assert 0.0 < profile.detection.search_roi.w <= 1.0
 
 
+def test_config_directory_uses_afk_brand(monkeypatch, tmp_path):
+    monkeypatch.delenv("AFK_CONFIG_DIR", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    assert cfg.config_dir() == tmp_path / "AFK"
+
+
 def test_unknown_key_is_rejected():
     with pytest.raises(ValidationError):
         cfg.Profile.model_validate({"name": "x", "mdoe": "A"})

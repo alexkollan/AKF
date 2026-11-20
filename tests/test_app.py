@@ -3,7 +3,7 @@ and a 1920x1080 second monitor to its left at (-1920,0). No window is created he
 
 import pytest
 
-from engine.app import MIN_SIZE, monitor_index_at, place_window
+from engine.app import MIN_SIZE, TITLE, monitor_index_at, place_window
 from engine.capture import MonitorInfo, Rect
 from engine.config import WindowState
 
@@ -24,6 +24,10 @@ SECOND = MonitorInfo(
     is_primary=False,
 )
 MONITORS = [PRIMARY, SECOND]
+
+
+def test_window_title_is_afk():
+    assert TITLE == "AFK"
 
 
 def test_default_opens_centred_on_the_second_monitor():

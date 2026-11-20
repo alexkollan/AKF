@@ -2,7 +2,7 @@
 
 A *profile* is everything that is tied to a fishing spot and a client setup: mode, key
 bindings, lures, detection thresholds, ROI and stop conditions. Profiles live as JSON in
-``%APPDATA%/fishbot/profiles``. *Settings* are machine-wide and live next to them.
+``%APPDATA%/AFK/profiles``. *Settings* are machine-wide and live next to them.
 
 Every field has a default, so a fresh install starts from a working configuration and the
 UI can offer "Reset to defaults" per screen.
@@ -299,13 +299,13 @@ _SAFE_NAME = re.compile(r"[^A-Za-z0-9 _.\-]")
 
 
 def config_dir() -> Path:
-    """``%APPDATA%/fishbot``, overridable with ``FISHBOT_CONFIG_DIR`` for tests."""
-    override = os.environ.get("FISHBOT_CONFIG_DIR")
+    """``%APPDATA%/AFK``, overridable with ``AFK_CONFIG_DIR`` for tests."""
+    override = os.environ.get("AFK_CONFIG_DIR")
     if override:
         return Path(override)
     appdata = os.environ.get("APPDATA")
     base = Path(appdata) if appdata else Path.home() / ".config"
-    return base / "fishbot"
+    return base / "AFK"
 
 
 def profiles_dir() -> Path:

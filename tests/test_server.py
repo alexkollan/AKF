@@ -88,6 +88,11 @@ def test_health(server):
     assert body["status"] == "stopped"
 
 
+def test_service_title_is_afk():
+    app = create_app(Controller(session_factory=sessions), enable_hotkeys=False)
+    assert app.title == "AFK engine"
+
+
 def test_start_and_stop_over_the_socket(server):
     with open_socket(server) as ws:
         send(ws, {"type": "start"})

@@ -1,5 +1,5 @@
 [project]
-name = "fishbot"
+name = "afk"
 version = "0.1.0"
 description = "Pixel/audio fishing bot for WoW Forever, with a local engine service and a React UI"
 requires-python = ">=3.12,<3.13"

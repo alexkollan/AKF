@@ -61,7 +61,7 @@ from tools import metrics
 
 DEFAULT_FIXTURES = Path("tests/fixtures")
 
-WINDOW_TITLE = "fishbot replay"
+WINDOW_TITLE = "AFK replay"
 MAX_VIDEO_WIDTH = 1100
 STRIP_HEIGHT = 150
 WAVE_HEIGHT = 92

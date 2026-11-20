@@ -54,7 +54,7 @@ Nov 20, 2026 · @Alex
 **Δομή repo**
 
 ```
-fishbot/
+AFK/
   CLAUDE.md
   docs/PLAN.md
   engine/
@@ -150,7 +150,7 @@ fishbot/
 ### M0 — Scaffold και CLAUDE.md
 
 ```
-Read docs/PLAN.md. Scaffold the fishbot repo exactly as in "Repo layout": Python 3.12 package `engine` (uv or pip-tools, ruff, pytest), Vite+React+TS app in `ui/`. Write CLAUDE.md with: stack decisions, folder purposes, coding conventions (type hints, pydantic models, no blocking calls in the asyncio loop), how to run engine/UI/tests, and the rule that detectors must be testable on recorded fixtures without the game running.
+Read docs/PLAN.md. Scaffold the AFK repo exactly as in "Repo layout": Python 3.12 package `engine` (uv or pip-tools, ruff, pytest), Vite+React+TS app in `ui/`. Write CLAUDE.md with: stack decisions, folder purposes, coding conventions (type hints, pydantic models, no blocking calls in the asyncio loop), how to run engine/UI/tests, and the rule that detectors must be testable on recorded fixtures without the game running.
 ```
 
 - [ ] `pytest` και `ruff` τρέχουν πράσινα σε άδειο project
@@ -199,7 +199,7 @@ Implement engine/fsm.py with the states and transitions in the PLAN diagram, mod
 ### M5 — Engine service, profiles και hotkeys
 
 ```
-Wrap the engine in engine/server.py (FastAPI + one WebSocket). Commands: start, pause, resume, stop, apply_lure, test_cast, set_config, load/save/list profiles, screenshot_roi. Events: state, stats, detector levels (10 Hz), log, catch. Profiles are JSON validated by pydantic in %APPDATA%/fishbot/profiles. Global hotkeys via pynput call the same commands.
+Wrap the engine in engine/server.py (FastAPI + one WebSocket). Commands: start, pause, resume, stop, apply_lure, test_cast, set_config, load/save/list profiles, screenshot_roi. Events: state, stats, detector levels (10 Hz), log, catch. Profiles are JSON validated by pydantic in %APPDATA%/AFK/profiles. Global hotkeys via pynput call the same commands.
 ```
 
 - [ ] Start/Stop και από hotkey και από WebSocket

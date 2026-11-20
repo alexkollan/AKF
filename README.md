@@ -1,4 +1,4 @@
-# Fishbot for WoW Forever
+# AFK for WoW Forever
 
 Fishes for you in World of Warcraft Forever. It listens to the game for the splash of a
 bite, reels in, and casts again; a control panel on your second monitor shows what it hears
