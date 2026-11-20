@@ -29,13 +29,15 @@ from dataclasses import dataclass
 from engine import audio as audio_mod
 from engine import capture, clock
 from engine.config import FusionMode, Mode, MouseOptions, Profile
-from engine.fsm import BiteSignal, FishingFSM, FsmEvent, Signals, Status
+from engine.fsm import BiteSignal, FishingFSM, FsmEvent, Signals, State, Status
 from engine.input import InputController, MouseButton, focus_window, has_focus
 from engine.stats import SessionStats
 
 logger = logging.getLogger(__name__)
 
 TICK_S = 0.01
+#: The UI chart is fed at 10 Hz (docs/PLAN.md, M5).
+LEVELS_INTERVAL_S = 0.1
 
 
 class SessionError(RuntimeError):
@@ -170,6 +172,8 @@ class Session:
         sleep_fn: Callable[[float], None] = time.sleep,
         rng: random.Random | None = None,
         on_event: Callable[[FsmEvent], None] | None = None,
+        on_levels: Callable[[audio_mod.DetectorLevel, float], None] | None = None,
+        single_cast: bool = False,
         tick_s: float = TICK_S,
     ) -> None:
         self.profile = profile
@@ -179,6 +183,8 @@ class Session:
         self.sleep_fn = sleep_fn
         self.rng = rng or random.Random()
         self.on_event = on_event or (lambda event: None)
+        self.on_levels = on_levels
+        self.single_cast = single_cast
         self.tick_s = tick_s
 
         self.controller = InputController(dry_run=self.dry_run)
@@ -186,15 +192,20 @@ class Session:
         self.fsm = FishingFSM(profile, InputActions(self.controller, None, profile.mouse), self.rng)
 
         self._lock = threading.Lock()
-        self._requests: list[tuple[str, str]] = []
+        self._requests: list[tuple[str, object]] = []
+        self._last_levels = -LEVELS_INTERVAL_S
 
     # -- control (any thread) ----------------------------------------------------------
 
-    def request(self, command: str, reason: str = "") -> None:
-        """``pause`` | ``resume`` | ``toggle_pause`` | ``stop`` | ``emergency_stop``
-        | ``apply_lure``."""
+    def request(self, command: str, payload: object = None) -> None:
+        """Queue a command for the next tick.
+
+        ``pause`` / ``stop`` / ``toggle_pause`` take an optional reason string,
+        ``update_profile`` a :class:`~engine.config.Profile`; ``resume``,
+        ``emergency_stop`` and ``apply_lure`` take nothing.
+        """
         with self._lock:
-            self._requests.append((command, reason))
+            self._requests.append((command, payload))
 
     @property
     def stats(self) -> SessionStats:
@@ -248,8 +259,10 @@ class Session:
                     bite = bites.poll(self.fsm.listening(now))
                     focused = None if self.dry_run else has_focus(self.window)
                     signals = Signals(bite=bite, focused=focused)
+                    self._emit_levels(bites.detector.last, now)
 
                 self.fsm.tick(now, signals)
+                self._finish_single_cast(now)
                 self._flush()
                 self.sleep_fn(self.tick_s)
         finally:
@@ -273,7 +286,8 @@ class Session:
     def _apply_requests(self, now: float) -> None:
         with self._lock:
             requests, self._requests = self._requests, []
-        for command, reason in requests:
+        for command, payload in requests:
+            reason = payload if isinstance(payload, str) else ""
             if command == "emergency_stop":
                 self.fsm.emergency_stop(now)
             elif command == "stop":
@@ -289,9 +303,30 @@ class Session:
                     self.fsm.pause(now, reason or "paused by user")
             elif command == "apply_lure":
                 self.fsm.apply_lure_now()
+            elif command == "update_profile" and isinstance(payload, Profile):
+                self.profile = payload
+                self.fsm.update_profile(payload)
             else:
                 logger.warning("unknown session command %r", command)
         self._flush()
+
+    def _emit_levels(self, level: audio_mod.DetectorLevel | None, now: float) -> None:
+        """Hand the detector's view to the UI chart, at most every ``LEVELS_INTERVAL_S``."""
+        if self.on_levels is None or level is None:
+            return
+        if now - self._last_levels < LEVELS_INTERVAL_S:
+            return
+        self._last_levels = now
+        self.on_levels(level, now)
+
+    def _finish_single_cast(self, now: float) -> None:
+        """ "Test one cast": stop as soon as the first cast has an outcome."""
+        if not self.single_cast or self.fsm.status is not Status.RUNNING:
+            return
+        stats = self.fsm.stats
+        if stats.catches + stats.misses >= 1 and self.fsm.state is State.RECOVER:
+            outcome = "hooked" if stats.catches else "no bite"
+            self.fsm.stop(now, f"test cast done: {outcome}")
 
     def _flush(self) -> None:
         for event in self.fsm.drain_events():

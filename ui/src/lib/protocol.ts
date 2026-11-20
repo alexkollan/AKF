@@ -1,8 +1,9 @@
 /**
  * Wire contract between the UI and `engine.server` (one WebSocket, JSON frames).
  *
- * Kept in one file on purpose: it is the only coupling between the two halves, and the
- * grind bot will reuse it. The engine side is implemented in M5.
+ * This mirrors `engine/protocol.py` field for field; the two change together. Field names
+ * are camelCase on the wire, except the `profile` / `settings` payloads, which carry the
+ * config models exactly as a profile JSON file stores them (snake_case).
  */
 
 export const ENGINE_STATES = [
@@ -26,42 +27,60 @@ export interface SessionStats {
   catches: number;
   misses: number;
   consecutiveMisses: number;
+  luresApplied: number;
   successRate: number;
   catchesPerHour: number;
 }
 
 export interface DetectorLevels {
-  /** Engine clock, milliseconds. */
+  /** Epoch milliseconds. */
   t: number;
+  /** In-band level, noise floor and trigger threshold, all dBFS. */
   audioLevel: number;
+  audioFloor: number;
   audioThreshold: number;
-  pixelSignal: number;
-  pixelThreshold: number;
+  /** Whether the bot was listening for a bite at this moment. */
+  armed: boolean;
+  /** Null until pixel detection exists. */
+  pixelSignal: number | null;
+  pixelThreshold: number | null;
 }
 
 export interface LogLine {
+  /** Epoch milliseconds. */
   t: number;
   level: "debug" | "info" | "warn" | "error";
   message: string;
 }
 
 export interface CatchRecord {
+  /** Epoch milliseconds. */
   t: number;
-  state: EngineState;
-  latencyMs: number | null;
+  /** Cast to bite. */
+  waitMs: number;
+  /** Bite heard to hook pressed. */
+  reactionMs: number;
 }
 
 /** Events the engine pushes to every connected client. */
 export type ServerEvent =
-  | { type: "state"; status: RunStatus; state: EngineState; reason?: string }
+  | { type: "state"; status: RunStatus; state: EngineState; reason: string | null }
   | { type: "stats"; stats: SessionStats }
   | { type: "levels"; levels: DetectorLevels }
   | { type: "log"; line: LogLine }
   | { type: "catch"; record: CatchRecord }
-  | { type: "config"; profile: unknown; settings: unknown }
-  | { type: "roi"; pngBase64: string; box: [number, number, number, number] | null };
+  | { type: "config"; profile: Record<string, unknown>; settings: Record<string, unknown> }
+  | { type: "profiles"; names: string[]; active: string }
+  | {
+      type: "roi";
+      pngBase64: string;
+      width: number;
+      height: number;
+      box: [number, number, number, number] | null;
+    }
+  | { type: "error"; message: string; command: string | null };
 
-/** Commands the UI sends. The global hotkeys call the same handlers. */
+/** Commands the UI sends. The global hotkeys call the same engine methods. */
 export type ClientCommand =
   | { type: "start" }
   | { type: "pause" }
@@ -70,8 +89,12 @@ export type ClientCommand =
   | { type: "emergency_stop" }
   | { type: "apply_lure"; name?: string }
   | { type: "test_cast" }
+  /** Deep-merged into the active profile; a running session applies it at the next cast. */
   | { type: "set_config"; patch: Record<string, unknown> }
+  /** Deep-merged into the machine-wide settings, which are saved immediately. */
+  | { type: "set_settings"; patch: Record<string, unknown> }
   | { type: "load_profile"; name: string }
-  | { type: "save_profile"; name: string }
+  /** Without a name, saves the active profile; with one, saves it under that name. */
+  | { type: "save_profile"; name?: string }
   | { type: "list_profiles" }
   | { type: "screenshot_roi" };

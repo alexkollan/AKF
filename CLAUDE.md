@@ -50,7 +50,9 @@ engine/
   lures.py          lure timer + apply sequence
   config.py         pydantic models, profiles (JSON)
   stats.py          session stats, catch log
-  server.py         FastAPI + WebSocket API
+  controller.py     single point of control: sessions, profiles, settings, event queue
+  protocol.py       WebSocket wire format (pydantic), mirrored by ui/src/lib/protocol.ts
+  server.py         FastAPI + one WebSocket on 127.0.0.1:8777, global hotkeys
 ui/                 Vite + React + TS
 tools/
   record_clip.py    records frames + audio of real casts
@@ -77,6 +79,7 @@ uv run python -m tools.listen  # live bite detection on WoW audio, nothing sent 
 uv run python -m engine.run --dry-run  # headless session: listens, logs keys, presses nothing
 uv run python -m engine.run    # fish for real (F10 pause, F12 emergency stop)
 uv run python -m engine.run --simulate --fast --minutes 30  # no game, half an hour in a second
+uv run python -m engine.server  # engine service for the UI: ws://127.0.0.1:8777/ws, F9/F10/F12
 npm --prefix ui run dev      # UI dev server on http://localhost:5173
 npm --prefix ui run build    # typecheck + production build
 ```
@@ -168,8 +171,12 @@ silently ignored key.
 ## UI conventions
 
 - Tokens in `ui/src/index.css` follow shadcn/ui names, so its components drop in unchanged.
-- `ui/src/lib/protocol.ts` is the single source of truth for the WebSocket contract; the
-  engine's pydantic models must match it. Change both sides in the same commit.
+- The WebSocket contract lives twice: `engine/protocol.py` (pydantic, validated) and
+  `ui/src/lib/protocol.ts` (types). They mirror each other field for field — camelCase on the
+  wire, except `profile`/`settings` payloads, which keep the config models' snake_case. Change
+  both sides in the same commit.
+- `ui/src/lib/ws.ts` keeps exactly one live socket; every handler ignores a socket that is no
+  longer current (StrictMode double-mounts effects in development).
 - The sidebar is data-driven (`SCREENS` in `ui/src/App.tsx`) so the grind bot's screens can be
   appended without a rewrite.
 - State colours mean one thing each: green running, amber paused, red stopped or error, grey
@@ -181,3 +188,14 @@ Milestones run in order (`docs/PLAN.md`, "milestones"), and detection (M2-M3) la
 UI because that is where the risk is. Anything that needs the game open — calibration, clip
 recording, in-game verification of a milestone's acceptance criteria — is done by the user, not
 by the agent. Write the tool, say exactly how to run it, and wait for the result.
+
+## Engine service
+
+`engine.server` is the long-running process the UI talks to. Commands from the WebSocket and
+the global hotkeys (F9 start/stop, F10 pause, F12 emergency stop — all swallowed before WoW
+sees them) go to the same `Controller` methods. The controller runs one `Session` at a time on
+a worker thread and turns everything into wire events on a thread-safe queue that the server
+pumps every 50 ms; a client that connects late gets a snapshot first. Only the UI's origins
+(and origin-less local clients) may connect. Emergency stop is a request the session applies
+at its next tick, so it lands in well under 100 ms (`tests/test_controller.py` measures it).
+Server tests run a real uvicorn on a free port with the `websockets` client.
