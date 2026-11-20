@@ -136,7 +136,10 @@ class TimingConfig(Model):
     land_delay_ms: Annotated[int, Field(ge=0, le=5000)] = 2000
     #: Cast key -> give up and recast. Bites were seen up to 25.9 s after the cast.
     max_wait_ms: Annotated[int, Field(ge=1000, le=60000)] = 30000
-    post_hook_delay_ms: Annotated[int, Field(ge=0, le=5000)] = 900
+    #: Bite heard -> hook. A human beat; the game allows a few seconds, so this costs nothing.
+    hook_delay_ms: Annotated[int, Field(ge=0, le=3000)] = 300
+    #: Hook -> recast. Loot (auto loot) finishes within ~0.7 s of the hook in-game.
+    post_hook_delay_ms: Annotated[int, Field(ge=0, le=5000)] = 1000
     between_casts_ms: Annotated[int, Field(ge=0, le=10000)] = 600
     jitter_ms: Annotated[int, Field(ge=0, le=2000)] = 180  # randomises the fixed delays
 

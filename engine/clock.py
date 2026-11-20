@@ -26,3 +26,20 @@ def now() -> float:
 def from_qpc(qpc_100ns: int) -> float:
     """Convert a WASAPI ``u64QPCPosition`` into :func:`now` seconds."""
     return qpc_100ns * _QPC_UNIT_S
+
+
+class SimClock:
+    """A clock that only moves when told to: for tests and fast simulated sessions.
+
+    ``now`` and ``sleep`` have the same shape as :func:`now` and ``time.sleep``, so a
+    session loop can run on either without knowing which.
+    """
+
+    def __init__(self, start: float = 1000.0) -> None:
+        self.t = start
+
+    def now(self) -> float:
+        return self.t
+
+    def sleep(self, seconds: float) -> None:
+        self.t += max(0.0, seconds)

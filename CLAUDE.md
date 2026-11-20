@@ -43,7 +43,10 @@ engine/
   clock.py          the one high-resolution clock (QPC) everything is stamped with
   vision/bobber.py  find bobber: HSV mask + template + blob scoring
   vision/bite.py    bite: drop/disappear/motion in ROI
-  fsm.py            fishing state machine, modes A/B/C
+  fsm.py            fishing state machine, modes A/B/C (pure: time and signals come in)
+  session.py        wires the FSM to audio, input and focus (or a simulated world)
+  run.py            headless CLI: python -m engine.run [--dry-run] [--simulate --fast]
+  hotkeys.py        global hotkeys that are swallowed before they reach WoW
   lures.py          lure timer + apply sequence
   config.py         pydantic models, profiles (JSON)
   stats.py          session stats, catch log
@@ -71,6 +74,9 @@ uv run python -m tools.record_clip --name <spot> --tags night,sea  # record fixt
 uv run python -m tools.replay [clip]  # list fixtures, or play one with markers
 uv run python -m tools.replay --metrics   # score the bite detector on all fixtures
 uv run python -m tools.listen  # live bite detection on WoW audio, nothing sent to the game
+uv run python -m engine.run --dry-run  # headless session: listens, logs keys, presses nothing
+uv run python -m engine.run    # fish for real (F10 pause, F12 emergency stop)
+uv run python -m engine.run --simulate --fast --minutes 30  # no game, half an hour in a second
 npm --prefix ui run dev      # UI dev server on http://localhost:5173
 npm --prefix ui run build    # typecheck + production build
 ```
@@ -128,6 +134,14 @@ median floor, only while armed. The state machine arms it after the bobber has l
 disarms it at the first detection. Every window feeds the median (excluding loud ones once made
 the floor unlearnable); tune `trigger_ratio` from fixtures with `tools.replay --sweep`, not by
 feel.
+
+**State machine.** `engine.fsm.FishingFSM` is pure: `tick(now, Signals)` in, `GameActions`
+calls and `FsmEvent`s out. It never reads a clock or touches capture, audio or input — keep it
+that way, because the 30-minute-per-mode soak tests (`tests/test_session.py`) run it on
+`clock.SimClock` with `session.SimulatedWorld`. Timing defaults in `TimingConfig` are measured
+in-game (landing 0.6-1.3 s, bites 6.8-25.9 s after the cast key); change them from data. Profile
+changes made while running take effect at the next cast. Mode B and pixel fusion are refused
+for a real game until bobber vision exists.
 
 **Coordinates.** All geometry is relative to the WoW *client area*, in physical pixels. The
 process is per-monitor DPI aware (`SetProcessDpiAwarenessContext`), so two monitors with
