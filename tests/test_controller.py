@@ -153,7 +153,10 @@ def test_test_cast_stops_after_one_outcome():
     controller = Controller(session_factory=fast_sessions)
     controller.test_cast()
     assert controller.wait(5.0)
-    assert controller._last_state.reason.startswith("test cast done")
+    assert (
+        controller._last_state.reason == "test done: 1 of 1 casts hooked"
+        or controller._last_state.reason == "test done: 0 of 1 casts hooked"
+    )
     stats = controller.stats_event().stats
     assert stats.casts == 1
 

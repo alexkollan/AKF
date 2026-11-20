@@ -48,6 +48,8 @@ engine/
   run.py            headless CLI: python -m engine.run [--dry-run] [--simulate --fast]
   app.py            desktop app: server + pywebview window on the remembered monitor
   hotkeys.py        global hotkeys that are swallowed before they reach WoW
+  bridge.py         decodes the FishBridge addon's colour strip (bags, combat, lure, channel)
+  calibration.py    the calibration wizard's steps and the analyses behind its suggestions
   lures.py          lure timer + apply sequence
   config.py         pydantic models, profiles (JSON)
   stats.py          session stats, catch log
@@ -61,8 +63,11 @@ tools/
   metrics.py        per-cast scoring of the bite detector against markers (M3)
   listen.py         live splash detector: prints BITE while you fish by hand
   spike.py          hardware smoke test (capture + input) against a live client
+  install_addon.py  copies addon/FishBridge into the game's Interface/AddOns
 tests/fixtures/     recorded clips, labelled
+addon/FishBridge/   the optional Lua addon (Interface 16001)
 docs/PLAN.md        the specification; milestones M0-M7
+README.md           setup and use, per mode
 ```
 
 ## Commands
@@ -217,3 +222,22 @@ pumps every 50 ms; a client that connects late gets a snapshot first. Only the U
 (and origin-less local clients) may connect. Emergency stop is a request the session applies
 at its next tick, so it lands in well under 100 ms (`tests/test_controller.py` measures it).
 Server tests run a real uvicorn on a free port with the `websockets` client.
+
+## FishBridge and calibration
+
+The addon paints four 4x4-pixel cells in the top-left corner; `engine/bridge.py` decodes them.
+The layout is written down at the top of `FishBridge.lua` and `bridge.encode` mirrors it — change
+both together. Every reading has its own valid bit and is taken inside `pcall`, doing all its
+comparing there, because a secret value in WoW Forever errors the moment it is compared outside.
+Missing, unreadable or frozen strips mean "no addon": every rule that needs it is skipped. Rules:
+combat pauses at once; full bags stop between casts; the lure timer follows the game (with a grace
+period after our own application); a channel that ended without a bite is a miss right away.
+"Pole equipped" is shown, never enforced, until it is confirmed in game.
+
+Calibration steps that listen or press keys run one at a time on the `Calibrator`'s thread and
+never overlap a fishing session. Suggestions are computed by pure functions
+(`analyse_ambient`, `suggest_land_delay_ms`) and applied only when the user accepts them. The
+ambient analysis uses the same clamped floor the detector does, and refuses digital silence (a
+muted or backgrounded WoW) instead of suggesting a number.
+
+Packaging (PyInstaller) is deferred by the user's choice; do not add it unasked.

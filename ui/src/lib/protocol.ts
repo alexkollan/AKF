@@ -93,7 +93,42 @@ export type ServerEvent =
       clientWidth: number;
       clientHeight: number;
     }
+  | ({ type: "bridge" } & BridgeInfo)
+  | { type: "windows"; windows: WindowItem[] }
+  | {
+      type: "calibration";
+      step: CalibrationStep;
+      status: "running" | "done" | "error";
+      progress: number;
+      message: string;
+      result: Record<string, unknown>;
+    }
   | { type: "error"; message: string; command: string | null };
+
+/** What the FishBridge addon reports. Null fields: the addon could not read them. */
+export interface BridgeInfo {
+  present: boolean;
+  freeSlots: number | null;
+  totalSlots: number | null;
+  inCombat: boolean | null;
+  poleEquipped: boolean | null;
+  lureActive: boolean | null;
+  lureRemainingS: number | null;
+  channelling: boolean | null;
+  channelS: number | null;
+}
+
+export interface WindowItem {
+  hwnd: number;
+  title: string;
+  process: string;
+  width: number;
+  height: number;
+  monitor: number;
+  likelyGame: boolean;
+}
+
+export type CalibrationStep = "window" | "bobber" | "sound" | "timing" | "finish";
 
 export interface AudioDevice {
   index: number;
@@ -111,7 +146,8 @@ export type ClientCommand =
   | { type: "stop" }
   | { type: "emergency_stop" }
   | { type: "apply_lure"; name?: string }
-  | { type: "test_cast" }
+  /** `count` casts with real outcomes, then stop (default 1). */
+  | { type: "test_cast"; count?: number }
   /** Deep-merged into the active profile; a running session applies it at the next cast. */
   | { type: "set_config"; patch: Record<string, unknown> }
   /** Deep-merged into the machine-wide settings, which are saved immediately. */
@@ -126,4 +162,12 @@ export type ClientCommand =
   /** Replace the active profile with a full profile JSON (from a file) and save it. */
   | { type: "import_profile"; profile: Record<string, unknown> }
   | { type: "delete_profile"; name: string }
-  | { type: "list_audio_devices" };
+  | { type: "list_audio_devices" }
+  | { type: "list_windows" }
+  | { type: "select_window"; hwnd: number }
+  /** Fractions of the client area. */
+  | { type: "capture_bobber"; x: number; y: number }
+  | { type: "calibrate_sound"; seconds?: number }
+  | { type: "measure_timing"; casts?: number }
+  | { type: "cancel_calibration" }
+  | { type: "finish_calibration" };

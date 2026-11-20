@@ -28,6 +28,7 @@ from dataclasses import dataclass
 
 from engine import audio as audio_mod
 from engine import capture, clock
+from engine.bridge import BridgeReader, BridgeState
 from engine.config import FusionMode, Mode, MouseOptions, Profile
 from engine.fsm import BiteSignal, FishingFSM, FsmEvent, Signals, State, Status
 from engine.input import InputController, MouseButton, focus_window, has_focus
@@ -36,8 +37,12 @@ from engine.stats import SessionStats
 logger = logging.getLogger(__name__)
 
 TICK_S = 0.01
+SIMULATED_CHANNEL_S = 30
+SIMULATED_TOTAL_SLOTS = 80
 #: The UI chart is fed at 10 Hz (docs/PLAN.md, M5).
 LEVELS_INTERVAL_S = 0.1
+#: FishBridge state for the UI: once a second is plenty for bags and combat.
+BRIDGE_INTERVAL_S = 1.0
 
 
 class SessionError(RuntimeError):
@@ -120,12 +125,14 @@ class SimulatedWorld:
     bite_window_s: tuple[float, float] = (6.8, 25.9)  # cast key -> bite, measured live
     locate_probability: float = 0.97
     bobber: tuple[int, int] = (960, 540)
+    bag_slots: int = 40  # free at the start
 
     def __post_init__(self) -> None:
         self._seen_cast: float | None = None
         self._bite_at: float | None = None
         self._splash_at = float("-inf")
         self._located = False
+        self._heartbeat = 0
 
     def poll(self, fsm: FishingFSM, now: float) -> Signals:
         cast_at = fsm.cast_at
@@ -149,7 +156,29 @@ class SimulatedWorld:
             self._located = True
             if self.rng.random() < self.locate_probability:
                 bobber = self.bobber
-        return Signals(bite=bite, bobber=bobber)
+        return Signals(bite=bite, bobber=bobber, bridge=self._bridge(fsm, now))
+
+    def _bridge(self, fsm: FishingFSM, now: float) -> BridgeState:
+        """A FishBridge that fills a bag slot per catch, so "bags full" can be seen too."""
+        self._heartbeat = (self._heartbeat + 1) % 256
+        cast_at = fsm.cast_at
+        channelling = (
+            cast_at is not None
+            and fsm.state in (State.CAST, State.LOCATE, State.WATCH)
+            and now - cast_at < SIMULATED_CHANNEL_S
+        )
+        remaining = fsm.lures.remaining(now)
+        return BridgeState(
+            heartbeat=self._heartbeat,
+            free_slots=max(0, self.bag_slots - fsm.stats.catches),
+            total_slots=SIMULATED_TOTAL_SLOTS,
+            in_combat=False,
+            pole_equipped=True,
+            lure_active=bool(remaining),
+            lure_remaining_s=remaining or 0.0,
+            channelling=channelling,
+            channel_s=SIMULATED_CHANNEL_S if channelling else 0,
+        )
 
     def level(self, now: float, armed: bool) -> audio_mod.DetectorLevel:
         """What the detector chart would show: ambience near -63 dBFS, splashes near -32.
@@ -189,7 +218,8 @@ class Session:
         rng: random.Random | None = None,
         on_event: Callable[[FsmEvent], None] | None = None,
         on_levels: Callable[[audio_mod.DetectorLevel, float], None] | None = None,
-        single_cast: bool = False,
+        on_bridge: Callable[[BridgeState | None], None] | None = None,
+        cast_limit: int | None = None,
         tick_s: float = TICK_S,
     ) -> None:
         self.profile = profile
@@ -200,7 +230,8 @@ class Session:
         self.rng = rng or random.Random()
         self.on_event = on_event or (lambda event: None)
         self.on_levels = on_levels
-        self.single_cast = single_cast
+        self.on_bridge = on_bridge
+        self.cast_limit = cast_limit
         self.tick_s = tick_s
 
         self.controller = InputController(dry_run=self.dry_run)
@@ -210,6 +241,7 @@ class Session:
         self._lock = threading.Lock()
         self._requests: list[tuple[str, object]] = []
         self._last_levels = -LEVELS_INTERVAL_S
+        self._last_bridge = -BRIDGE_INTERVAL_S
 
     # -- control (any thread) ----------------------------------------------------------
 
@@ -234,6 +266,7 @@ class Session:
         world: SimulatedWorld | None = None
         bites: AudioBites | None = None
         source: audio_mod.AudioSource | None = None
+        bridge: BridgeReader | None = None
 
         try:
             if self.simulate:
@@ -249,6 +282,7 @@ class Session:
                 source = audio_mod.open_audio_source(pid, device_index=detection.device_index)
                 bites = AudioBites(source, audio_mod.SplashDetector(detection, source.sample_rate))
                 source.start()
+                bridge = BridgeReader(self.window)
                 if not self.dry_run and not focus_window(self.window):
                     msg = "could not bring WoW to the front; click into the game and retry"
                     raise SessionError(msg)
@@ -276,11 +310,13 @@ class Session:
                     assert bites is not None and self.window is not None
                     bite = bites.poll(self.fsm.listening(now))
                     focused = None if self.dry_run else has_focus(self.window)
-                    signals = Signals(bite=bite, focused=focused)
+                    state = bridge.poll(now) if bridge is not None else None
+                    signals = Signals(bite=bite, focused=focused, bridge=state)
                     self._emit_levels(bites.detector.last, now)
 
                 self.fsm.tick(now, signals)
-                self._finish_single_cast(now)
+                self._emit_bridge(signals.bridge, now)
+                self._finish_cast_limit(now)
                 self._flush()
                 self.sleep_fn(self.tick_s)
         finally:
@@ -337,14 +373,21 @@ class Session:
         self._last_levels = now
         self.on_levels(level, now)
 
-    def _finish_single_cast(self, now: float) -> None:
-        """ "Test one cast": stop as soon as the first cast has an outcome."""
-        if not self.single_cast or self.fsm.status is not Status.RUNNING:
+    def _emit_bridge(self, state: BridgeState | None, now: float) -> None:
+        if self.on_bridge is None or now - self._last_bridge < BRIDGE_INTERVAL_S:
+            return
+        self._last_bridge = now
+        self.on_bridge(state)
+
+    def _finish_cast_limit(self, now: float) -> None:
+        """Test runs ("Test one cast", calibration's five casts): stop once enough casts
+        have an outcome, and say how they went."""
+        if self.cast_limit is None or self.fsm.status is not Status.RUNNING:
             return
         stats = self.fsm.stats
-        if stats.catches + stats.misses >= 1 and self.fsm.state is State.RECOVER:
-            outcome = "hooked" if stats.catches else "no bite"
-            self.fsm.stop(now, f"test cast done: {outcome}")
+        done = stats.catches + stats.misses
+        if done >= self.cast_limit and self.fsm.state is State.RECOVER:
+            self.fsm.stop(now, f"test done: {stats.catches} of {done} casts hooked")
 
     def _flush(self) -> None:
         for event in self.fsm.drain_events():

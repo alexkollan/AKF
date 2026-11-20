@@ -1,0 +1,7 @@
+## Interface: 16001
+## Title: FishBridge
+## Notes: Shows a 4-cell colour strip in the top-left corner for the fishing engine to read.
+## Version: 1.0.0
+## DefaultState: enabled
+
+FishBridge.lua

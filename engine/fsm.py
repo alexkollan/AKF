@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol
 
+from engine.bridge import BridgeState
 from engine.config import Lure, Mode, Profile
 from engine.lures import LureScheduler
 from engine.stats import CatchRecord, SessionStats
@@ -81,6 +82,8 @@ class Signals:
     bobber: tuple[int, int] | None = None
     #: Whether WoW has focus; ``None`` when not checked (dry run, simulation).
     focused: bool | None = None
+    #: What the FishBridge addon reports; ``None`` when it is not installed or not visible.
+    bridge: BridgeState | None = None
 
 
 NO_SIGNALS = Signals()
@@ -120,6 +123,7 @@ class _Cast:
     hook_at: float | None = None
     hooked: bool = False
     bobber: tuple[int, int] | None = None
+    channel_seen: bool = False
 
 
 @dataclass
@@ -145,6 +149,7 @@ class FishingFSM:
         self._cast: _Cast | None = None
         self._lure: _Lure | None = None
         self._pending_profile: Profile | None = None
+        self.bridge: BridgeState | None = None
 
     # ==================================================================================
     # control
@@ -242,6 +247,8 @@ class FishingFSM:
         if signals.focused is False and self.profile.stop.pause_on_focus_loss:
             self.pause(now, "WoW lost focus")
             return
+        if self._bridge_rules(now, signals.bridge):
+            return
         if self._duration_limit_reached(now):
             return
 
@@ -260,6 +267,13 @@ class FishingFSM:
 
     def _tick_recover(self, now: float) -> None:
         if now < self._until:
+            return
+        if (
+            self.profile.stop.stop_on_bags_full
+            and self.bridge is not None
+            and self.bridge.bags_full
+        ):
+            self.stop(now, "Stopped: bags are full")
             return
         lure = self.lures.due(now)
         if lure is not None:
@@ -334,8 +348,26 @@ class FishingFSM:
                 f"bite after {bite.t - cast.at:.1f}s (+{bite.strength_db:.1f} dB, {bite.source})",
             )
             return
+        if self._channel_ended(cast, signals.bridge):
+            self._miss(now, f"the line came back empty after {now - cast.at:.0f}s")
+            return
         if now - cast.at >= self.profile.timing.max_wait_ms / 1000.0:
             self._miss(now, f"no bite in {self.profile.timing.max_wait_ms / 1000:g}s")
+
+    @staticmethod
+    def _channel_ended(cast: _Cast, bridge: BridgeState | None) -> bool:
+        """With FishBridge, the end of the fishing channel is known instead of waited out.
+
+        Only an end that follows a seen start counts: a cast is "channelling" once the addon
+        has reported it, and "ended" when it then stops — never just because the first few
+        readings after the key press have not caught up yet.
+        """
+        if bridge is None or bridge.channelling is None:
+            return False
+        if bridge.channelling:
+            cast.channel_seen = True
+            return False
+        return cast.channel_seen
 
     def _tick_hook(self, now: float) -> None:
         cast = self._cast
@@ -375,6 +407,23 @@ class FishingFSM:
     # ==================================================================================
     # outcomes and limits
     # ==================================================================================
+
+    def _bridge_rules(self, now: float, bridge: BridgeState | None) -> bool:
+        """Apply what FishBridge reports. Returns True when the machine stopped or paused.
+
+        Combat pauses at once — keys must not keep landing while something is hitting you.
+        Full bags are checked between casts (see ``_tick_recover``) so the last catch is
+        still looted. Without the addon nothing here applies.
+        """
+        self.bridge = bridge
+        if bridge is None:
+            return False
+        if bridge.in_combat and self.profile.stop.pause_on_combat:
+            self.pause(now, "Paused: in combat")
+            return True
+        if bridge.lure_active is not None:
+            self.lures.observe(bridge.lure_active, bridge.lure_remaining_s, now)
+        return False
 
     def _miss(self, now: float, why: str) -> None:
         self.stats.record_miss()

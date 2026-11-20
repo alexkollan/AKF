@@ -34,7 +34,10 @@ def simulated(profile: Profile, seed: int = 0) -> tuple[Session, SimClock]:
 
 @pytest.mark.parametrize("mode", list(Mode))
 def test_thirty_minute_session_in_every_mode(mode):
-    profile = Profile(mode=mode, stop=StopConditions(consecutive_misses=20))
+    # Bags full would end it early: the simulated FishBridge fills a slot per catch.
+    profile = Profile(
+        mode=mode, stop=StopConditions(consecutive_misses=20, stop_on_bags_full=False)
+    )
     session, sim = simulated(profile, seed=7)
     stats = session.run(duration_s=THIRTY_MIN)
 

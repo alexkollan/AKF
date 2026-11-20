@@ -58,7 +58,10 @@ class ApplyLure(Wire):
 
 
 class TestCast(Wire):
+    """A test run: ``count`` casts with real outcomes, then stop."""
+
     type: Literal["test_cast"]
+    count: Annotated[int, Field(ge=1, le=50)] = 1
 
 
 class SetConfig(Wire):
@@ -117,6 +120,49 @@ class ListAudioDevices(Wire):
     type: Literal["list_audio_devices"]
 
 
+class ListWindows(Wire):
+    type: Literal["list_windows"]
+
+
+class SelectWindow(Wire):
+    """Calibration step 1: this is the game window."""
+
+    type: Literal["select_window"]
+    hwnd: int
+
+
+class CaptureBobber(Wire):
+    """Calibration step 3: the bobber is here, as fractions of the client area."""
+
+    type: Literal["capture_bobber"]
+    x: Annotated[float, Field(ge=0.0, le=1.0)]
+    y: Annotated[float, Field(ge=0.0, le=1.0)]
+
+
+class CalibrateSound(Wire):
+    """Calibration step 4: listen to the spot's ambience for this long."""
+
+    type: Literal["calibrate_sound"]
+    seconds: Annotated[float, Field(ge=5.0, le=120.0)] = 20.0
+
+
+class MeasureTiming(Wire):
+    """Calibration step 5: cast this many times and time the landing."""
+
+    type: Literal["measure_timing"]
+    casts: Annotated[int, Field(ge=1, le=10)] = 3
+
+
+class CancelCalibration(Wire):
+    type: Literal["cancel_calibration"]
+
+
+class FinishCalibration(Wire):
+    """Stamp the profile as calibrated now and save it."""
+
+    type: Literal["finish_calibration"]
+
+
 Command = Annotated[
     Start
     | Pause
@@ -134,7 +180,14 @@ Command = Annotated[
     | ScreenshotClient
     | ImportProfile
     | DeleteProfile
-    | ListAudioDevices,
+    | ListAudioDevices
+    | ListWindows
+    | SelectWindow
+    | CaptureBobber
+    | CalibrateSound
+    | MeasureTiming
+    | CancelCalibration
+    | FinishCalibration,
     Field(discriminator="type"),
 ]
 
@@ -250,6 +303,48 @@ class RoiEvent(Wire):
     box: tuple[int, int, int, int] | None = None
 
 
+class BridgeEvent(Wire):
+    """What the FishBridge addon reports, once a second during a session."""
+
+    type: Literal["bridge"] = "bridge"
+    present: bool
+    free_slots: int | None = None
+    total_slots: int | None = None
+    in_combat: bool | None = None
+    pole_equipped: bool | None = None
+    lure_active: bool | None = None
+    lure_remaining_s: float | None = None
+    channelling: bool | None = None
+    channel_s: int | None = None
+
+
+class WindowItem(Wire):
+    hwnd: int
+    title: str
+    process: str
+    width: int
+    height: int
+    monitor: int
+    #: Runs one of the known WoW executables.
+    likely_game: bool
+
+
+class WindowsEvent(Wire):
+    type: Literal["windows"] = "windows"
+    windows: list[WindowItem]
+
+
+class CalibrationEvent(Wire):
+    """Progress or outcome of one calibration step."""
+
+    type: Literal["calibration"] = "calibration"
+    step: str
+    status: Literal["running", "done", "error"]
+    progress: float = 0.0
+    message: str = ""
+    result: dict[str, Any] = Field(default_factory=dict)
+
+
 class ErrorEvent(Wire):
     type: Literal["error"] = "error"
     message: str
@@ -267,5 +362,8 @@ Event = (
     | RoiEvent
     | AudioDevicesEvent
     | ClientShotEvent
+    | BridgeEvent
+    | WindowsEvent
+    | CalibrationEvent
     | ErrorEvent
 )

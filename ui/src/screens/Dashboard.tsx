@@ -36,7 +36,8 @@ const STATUS_TEXT: Record<RunStatus, string> = {
 };
 
 /** Reasons the user caused; anything else is the bot stopping itself and deserves a banner. */
-const USER_REASONS = new Set(["stopped by user", "paused by user", "test cast done: hooked", "test cast done: no bite"]);
+const USER_REASONS = new Set(["stopped by user", "paused by user"]);
+const isUserReason = (reason: string) => USER_REASONS.has(reason) || reason.startsWith("test done");
 
 interface DashboardProps {
   openScreen: (id: string) => void;
@@ -49,7 +50,7 @@ export function Dashboard({ openScreen }: DashboardProps) {
     // A column, not a grid: the banner comes and goes, and a grid's row tracks would shift.
     <section className="flex h-full flex-col gap-5 p-6">
       <Header status={status} state={state} connected={connected} />
-      {stopReason && !USER_REASONS.has(stopReason) && status !== "running" && (
+      {stopReason && !isUserReason(stopReason) && status !== "running" && (
         <StopBanner status={status} reason={stopReason} openScreen={openScreen} />
       )}
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(220px,45%)_minmax(0,1fr)] gap-5">
@@ -274,6 +275,8 @@ function Session() {
         </dl>
       </div>
 
+      <BridgeStatus />
+
       <div className="flex min-h-0 flex-1 gap-4 border-t border-shoal pt-4">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold">Search area</p>
@@ -304,6 +307,62 @@ function Session() {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * What the FishBridge addon says, as a row of short facts. Only shown during a session,
+ * since that is when the engine reads it; without the addon it says what it would add.
+ */
+function BridgeStatus() {
+  const bridge = useEngineStore((store) => store.bridge);
+  const active = useEngineStore((store) => store.status === "running" || store.status === "paused");
+  if (!active || bridge === null) {
+    return null;
+  }
+  if (!bridge.present) {
+    return (
+      <p className="-mt-2 text-xs text-mist">
+        FishBridge addon not seen. With it the bot also stops when your bags are full and pauses
+        when something attacks you.
+      </p>
+    );
+  }
+
+  const facts: { text: string; tone: "ok" | "warn" | "bad" }[] = [];
+  if (bridge.freeSlots !== null && bridge.totalSlots !== null) {
+    facts.push({
+      text: `${bridge.freeSlots} of ${bridge.totalSlots} bag slots free`,
+      tone: bridge.freeSlots === 0 ? "bad" : bridge.freeSlots < 5 ? "warn" : "ok",
+    });
+  }
+  if (bridge.inCombat !== null) {
+    facts.push(bridge.inCombat ? { text: "In combat", tone: "bad" } : { text: "Not in combat", tone: "ok" });
+  }
+  if (bridge.poleEquipped !== null) {
+    facts.push(
+      bridge.poleEquipped
+        ? { text: "Fishing pole equipped", tone: "ok" }
+        : { text: "No fishing pole equipped", tone: "warn" },
+    );
+  }
+  if (bridge.lureActive !== null) {
+    facts.push(
+      bridge.lureActive && bridge.lureRemainingS
+        ? { text: `Lure on, ${Math.ceil(bridge.lureRemainingS / 60)} min left`, tone: "ok" }
+        : { text: "No lure on", tone: "ok" },
+    );
+  }
+
+  const toneClass = { ok: "text-foam", warn: "text-state-paused", bad: "text-state-error" };
+  return (
+    <ul className="-mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs" aria-label="FishBridge addon">
+      {facts.map((fact) => (
+        <li key={fact.text} className={toneClass[fact.tone]}>
+          {fact.text}
+        </li>
+      ))}
+    </ul>
   );
 }
 

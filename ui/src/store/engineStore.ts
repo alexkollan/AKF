@@ -2,6 +2,8 @@ import { create } from "zustand";
 
 import type {
   AudioDevice,
+  BridgeInfo,
+  CalibrationStep,
   CatchRecord,
   DetectorLevels,
   EngineState,
@@ -9,6 +11,7 @@ import type {
   RunStatus,
   SessionStats,
   ServerEvent,
+  WindowItem,
 } from "@/lib/protocol";
 
 /** How many samples the live detector chart keeps. At 10 Hz that is one minute. */
@@ -42,6 +45,13 @@ interface ClientShot {
   clientHeight: number;
 }
 
+export interface CalibrationProgress {
+  status: "running" | "done" | "error";
+  progress: number;
+  message: string;
+  result: Record<string, unknown>;
+}
+
 interface EngineStore {
   connected: boolean;
   status: RunStatus;
@@ -59,6 +69,9 @@ interface EngineStore {
   audioDevices: AudioDevice[];
   clientShot: ClientShot | null;
   profiles: { names: string[]; active: string };
+  bridge: BridgeInfo | null;
+  windows: WindowItem[];
+  calibration: Partial<Record<CalibrationStep, CalibrationProgress>>;
   lastError: { message: string; command: string | null; at: number } | null;
 
   setConnected: (connected: boolean) => void;
@@ -83,6 +96,9 @@ export const useEngineStore = create<EngineStore>((set) => ({
   audioDevices: [],
   clientShot: null,
   profiles: { names: [], active: "" },
+  bridge: null,
+  windows: [],
+  calibration: {},
   lastError: null,
 
   setConnected: (connected) => set({ connected }),
@@ -112,6 +128,24 @@ export const useEngineStore = create<EngineStore>((set) => ({
               height: event.height,
               clientWidth: event.clientWidth,
               clientHeight: event.clientHeight,
+            },
+          };
+        case "bridge": {
+          const { type: _type, ...info } = event;
+          return { bridge: info };
+        }
+        case "windows":
+          return { windows: event.windows };
+        case "calibration":
+          return {
+            calibration: {
+              ...prev.calibration,
+              [event.step]: {
+                status: event.status,
+                progress: event.progress,
+                message: event.message,
+                result: event.result,
+              },
             },
           };
         case "profiles":

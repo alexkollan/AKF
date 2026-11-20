@@ -28,10 +28,14 @@ import numpy as np
 from engine import audio as audio_mod
 from engine import capture, clock
 from engine import config as cfg
+from engine.bridge import BridgeState
+from engine.calibration import CalibrationError, CalibrationUpdate, Calibrator
 from engine.fsm import FsmEvent, Status
 from engine.protocol import (
     AudioDevice,
     AudioDevicesEvent,
+    BridgeEvent,
+    CalibrationEvent,
     CatchEvent,
     CatchWire,
     ClientShotEvent,
@@ -46,6 +50,8 @@ from engine.protocol import (
     RoiEvent,
     StateEvent,
     StatsEvent,
+    WindowItem,
+    WindowsEvent,
 )
 from engine.session import Session, SessionError
 from engine.stats import SessionStats
@@ -123,6 +129,11 @@ class Controller:
         self._thread: threading.Thread | None = None
         self._last_state = StateEvent(status=Status.STOPPED.value, state="IDLE")
         self._last_stats = SessionStats()
+        self.calibrator = Calibrator(
+            profile=lambda: self.profile,
+            settings=lambda: self.settings,
+            report=self._on_calibration,
+        )
 
     # ==================================================================================
     # queries
@@ -170,7 +181,11 @@ class Controller:
     # session control
     # ==================================================================================
 
-    def start(self, *, single_cast: bool = False) -> None:
+    def start(self, *, cast_limit: int | None = None) -> None:
+        if self.calibrator.busy:
+            # Both would press keys in the same game; never let them overlap.
+            self.report_error("finish or cancel the calibration step first", "start")
+            return
         with self._lock:
             if self._session is not None:
                 if self._session.fsm.status is Status.PAUSED:
@@ -181,7 +196,8 @@ class Controller:
                 dry_run=self.settings.dry_run,
                 on_event=self._on_fsm_event,
                 on_levels=self._on_levels,
-                single_cast=single_cast,
+                on_bridge=self._on_bridge,
+                cast_limit=cast_limit,
             )
             self._session = session
             self._thread = threading.Thread(
@@ -189,9 +205,10 @@ class Controller:
             )
             self._thread.start()
 
-    def test_cast(self) -> None:
-        """One cast, one outcome, then stop: the Detection screen's "Test one cast"."""
-        self.start(single_cast=True)
+    def test_cast(self, count: int = 1) -> None:
+        """``count`` casts with real outcomes, then stop: "Test one cast" and the
+        calibration's confirming run."""
+        self.start(cast_limit=count)
 
     def stop(self, reason: str = "stopped by user") -> None:
         self._request("stop", reason)
@@ -312,6 +329,73 @@ class Controller:
                     )
                     for device in devices
                 ]
+            )
+        )
+
+    # ==================================================================================
+    # calibration
+    # ==================================================================================
+
+    def list_windows(self) -> None:
+        known = {name.lower() for name in capture.DEFAULT_WOW_PROCESSES}
+        windows = [
+            WindowItem(
+                hwnd=w.hwnd,
+                title=w.title,
+                process=w.process_name,
+                width=w.client_rect.width,
+                height=w.client_rect.height,
+                monitor=w.monitor.index,
+                likely_game=w.process_name.lower() in known,
+            )
+            for w in capture.list_windows()
+            if w.client_rect.width >= 320 and w.client_rect.height >= 240
+        ]
+        windows.sort(key=lambda item: (not item.likely_game, item.process.lower()))
+        self._push(WindowsEvent(windows=windows))
+
+    def select_window(self, hwnd: int) -> None:
+        self.set_config(self.calibrator.window_patch(hwnd))
+        self._on_calibration(CalibrationUpdate("window", "done", 1.0))
+
+    def capture_bobber(self, x: float, y: float) -> None:
+        patch = self.calibrator.bobber_patch(x, y)
+        self.set_config(patch)
+        path = patch["detection"]["bobber"]["template_paths"][0]
+        self._on_calibration(
+            CalibrationUpdate("bobber", "done", 1.0, result={"templatePath": path})
+        )
+
+    def calibrate_sound(self, seconds: float) -> None:
+        self._refuse_while_fishing()
+        self.calibrator.start_sound(seconds)
+
+    def measure_timing(self, casts: int) -> None:
+        self._refuse_while_fishing()
+        self.calibrator.start_timing(casts)
+
+    def cancel_calibration(self) -> None:
+        self.calibrator.cancel()
+
+    def finish_calibration(self) -> None:
+        with self._lock:
+            self.profile = cfg.touch_calibration(self.profile)
+        self.save_profile()
+        self._on_calibration(CalibrationUpdate("finish", "done", 1.0))
+
+    def _refuse_while_fishing(self) -> None:
+        if self.running:
+            msg = "stop fishing before calibrating"
+            raise CalibrationError(msg)
+
+    def _on_calibration(self, update: CalibrationUpdate) -> None:
+        self._push(
+            CalibrationEvent(
+                step=update.step,
+                status=update.status,
+                progress=round(update.progress, 3),
+                message=update.message,
+                result=update.result,
             )
         )
 
@@ -450,6 +534,24 @@ class Controller:
                     audio_threshold=round(level.threshold_db, 1),
                     armed=level.armed,
                 )
+            )
+        )
+
+    def _on_bridge(self, state: BridgeState | None) -> None:
+        if state is None:
+            self._push(BridgeEvent(present=False))
+            return
+        self._push(
+            BridgeEvent(
+                present=True,
+                free_slots=state.free_slots,
+                total_slots=state.total_slots,
+                in_combat=state.in_combat,
+                pole_equipped=state.pole_equipped,
+                lure_active=state.lure_active,
+                lure_remaining_s=state.lure_remaining_s,
+                channelling=state.channelling,
+                channel_s=state.channel_s,
             )
         )
 

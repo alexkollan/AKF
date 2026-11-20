@@ -209,8 +209,8 @@ def _monitor_for_window(hwnd: int, monitors: Sequence[MonitorInfo]) -> MonitorIn
     return monitors[0]
 
 
-def _process_name(pid: int) -> str:
-    """Executable name for a pid, or "" when the process cannot be opened."""
+def process_path(pid: int) -> str:
+    """Full executable path for a pid, or "" when the process cannot be opened."""
     process_query_limited_information = 0x1000
     kernel32 = ctypes.windll.kernel32
     handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
@@ -221,9 +221,14 @@ def _process_name(pid: int) -> str:
         buffer = ctypes.create_unicode_buffer(size.value)
         if not kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
             return ""
-        return buffer.value.rsplit("\\", 1)[-1]
+        return buffer.value
     finally:
         kernel32.CloseHandle(handle)
+
+
+def _process_name(pid: int) -> str:
+    """Executable name for a pid, or "" when the process cannot be opened."""
+    return process_path(pid).rsplit("\\", 1)[-1]
 
 
 def describe_window(hwnd: int, monitors: Sequence[MonitorInfo] | None = None) -> WindowInfo:

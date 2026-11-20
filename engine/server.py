@@ -35,6 +35,8 @@ from pydantic import ValidationError
 from engine import capture
 from engine import config as cfg
 from engine import protocol as proto
+from engine.audio import AudioError
+from engine.calibration import CalibrationError
 from engine.controller import Controller
 from engine.hotkeys import SwallowingHotkeys
 from engine.session import Session
@@ -126,8 +128,8 @@ async def handle(controller: Controller, command: proto.Command) -> None:
             controller.emergency_stop()
         case proto.ApplyLure():
             controller.apply_lure()
-        case proto.TestCast():
-            controller.test_cast()
+        case proto.TestCast(count=count):
+            controller.test_cast(count)
         case proto.SetConfig(patch=patch):
             controller.set_config(patch)
         case proto.SetSettings(patch=patch):
@@ -148,6 +150,20 @@ async def handle(controller: Controller, command: proto.Command) -> None:
             await asyncio.to_thread(controller.delete_profile, name)
         case proto.ListAudioDevices():
             await asyncio.to_thread(controller.list_audio_devices)
+        case proto.ListWindows():
+            await asyncio.to_thread(controller.list_windows)
+        case proto.SelectWindow(hwnd=hwnd):
+            await asyncio.to_thread(controller.select_window, hwnd)
+        case proto.CaptureBobber(x=x, y=y):
+            await asyncio.to_thread(controller.capture_bobber, x, y)
+        case proto.CalibrateSound(seconds=seconds):
+            controller.calibrate_sound(seconds)
+        case proto.MeasureTiming(casts=casts):
+            controller.measure_timing(casts)
+        case proto.CancelCalibration():
+            controller.cancel_calibration()
+        case proto.FinishCalibration():
+            await asyncio.to_thread(controller.finish_calibration)
 
 
 def create_app(
@@ -172,7 +188,9 @@ def create_app(
         finally:
             binder.unbind()
             controller.emergency_stop()
+            controller.cancel_calibration()
             await asyncio.to_thread(controller.wait, 2.0)
+            await asyncio.to_thread(controller.calibrator.wait, 2.0)
             pump.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await pump
@@ -220,7 +238,14 @@ async def _dispatch(controller: Controller, ws: WebSocket, frame: object) -> Non
         await handle(controller, command)
     except ValidationError as exc:
         await ws.send_json(proto.ErrorEvent(message=_short(exc), command=name).to_json())
-    except (FileNotFoundError, capture.CaptureError, OSError, ValueError) as exc:
+    except (
+        FileNotFoundError,
+        capture.CaptureError,
+        CalibrationError,
+        AudioError,
+        OSError,
+        ValueError,
+    ) as exc:
         await ws.send_json(proto.ErrorEvent(message=str(exc), command=name).to_json())
 
 

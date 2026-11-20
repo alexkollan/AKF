@@ -11,12 +11,18 @@ from __future__ import annotations
 
 from engine.config import Lure, LureConfig
 
+#: After applying a lure, ignore "no lure" from FishBridge this long: the addon reads the
+#: game a few times a second, and a stale "off" right after we put one on would apply a
+#: second lure at the next cast.
+OBSERVE_GRACE_S = 5.0
+
 
 class LureScheduler:
     def __init__(self, config: LureConfig) -> None:
         self.config = config
         self._expires_at: float | None = None
         self._applied_name: str | None = None
+        self._applied_at = float("-inf")
         self._forced = False
 
     @property
@@ -44,8 +50,24 @@ class LureScheduler:
 
     def applied(self, lure: Lure, now: float) -> None:
         self._applied_name = lure.name
+        self._applied_at = now
         self._expires_at = now + lure.duration_min * 60.0
         self._forced = False
+
+    def observe(self, active: bool, remaining_s: float | None, now: float) -> None:
+        """What the game says about the lure (FishBridge), which beats our own timer.
+
+        A lure that dropped off early, or one put on by hand, is picked up here: the timer
+        follows the game instead of assuming every application lasted its full duration.
+        """
+        lure = self.lure
+        if not active:
+            if now - self._applied_at >= OBSERVE_GRACE_S:
+                self._expires_at = None
+            return
+        if lure is not None and remaining_s is not None:
+            self._applied_name = lure.name
+            self._expires_at = now + remaining_s
 
     def apply_now(self) -> None:
         """The UI's "Apply now": apply before the next cast regardless of the timer."""
