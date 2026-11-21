@@ -2,14 +2,19 @@
 
 Three things have to be right before anything else works:
 
-* every coordinate is a **physical pixel** (on Windows the process is per-monitor DPI
-  aware), so two monitors with different scaling do not shift the ROI;
+* every coordinate is in the operating system's own global screen space: **physical
+  pixels** on Windows (the process is per-monitor DPI aware), **points** on macOS (the
+  Quartz display space that window bounds, events and capture all use). Either way two
+  monitors with different scaling do not shift the ROI;
 * geometry is anchored to the WoW **client area**, not the window frame, so the title bar
   and borders never offset a right-click;
 * capture happens on a worker thread, never on the asyncio loop.
 
 Frames come back as ``numpy`` arrays shaped ``(height, width, 3)`` in **BGR** order, which
-is what OpenCV expects, regardless of which backend produced them.
+is what OpenCV expects, regardless of which backend produced them. A frame is always at the
+display's native resolution: ``MonitorInfo.scale`` pixels per coordinate unit, so a region
+of 400x300 points on a Retina display arrives as an 800x600 frame (on Windows the scale is
+always 1).
 
 This module is portable. Window and monitor discovery and the fast capture path come from
 the operating system's backend (``engine.native``); ``mss`` is the fallback everywhere.
@@ -31,14 +36,17 @@ from engine.config import CaptureBackend, RoiFraction
 
 logger = logging.getLogger(__name__)
 
-# WoW Forever runs on the Mainline (retail) client as Wow.exe — confirmed in-game. The
-# rest are fallbacks for other Blizzard clients; the active profile overrides this list.
+# WoW Forever runs on the Mainline (retail) client as Wow.exe on Windows and as the
+# executable "World of Warcraft" (inside _forever_/World of Warcraft.app) on macOS, both
+# confirmed. The rest are fallbacks for other Blizzard clients; the active profile
+# overrides this list.
 DEFAULT_WOW_PROCESSES: tuple[str, ...] = (
     "Wow.exe",
     "WowT.exe",
     "WowB.exe",
     "WowClassic.exe",
     "World of Warcraft.exe",
+    "World of Warcraft",
 )
 
 
@@ -63,7 +71,10 @@ def ensure_dpi_awareness() -> None:
 
 @dataclass(frozen=True, slots=True)
 class Rect:
-    """A rectangle in physical pixels. ``right`` and ``bottom`` are exclusive."""
+    """A rectangle in screen coordinates (pixels on Windows, points on macOS).
+
+    ``right`` and ``bottom`` are exclusive.
+    """
 
     left: int
     top: int
@@ -113,6 +124,12 @@ class MonitorInfo:
     rect: Rect
     work_rect: Rect
     is_primary: bool
+    #: Captured pixels per coordinate unit: 2.0 on a Retina display, always 1.0 on Windows.
+    scale: float = 1.0
+
+    def to_pixels(self, length: int) -> int:
+        """A length in screen coordinates as captured pixels on this monitor."""
+        return round(length * self.scale)
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,7 +145,7 @@ class WindowInfo:
     monitor: MonitorInfo
 
     def roi(self, fraction: RoiFraction) -> Rect:
-        """Convert a profile's relative ROI into screen-space physical pixels."""
+        """Convert a profile's relative ROI into screen coordinates."""
         return roi_to_screen(self.client_rect, fraction)
 
     def client_to_screen(self, x: int, y: int) -> tuple[int, int]:
@@ -184,22 +201,30 @@ def find_game_window(
 ) -> WindowInfo:
     """Locate the WoW client window.
 
-    ``process_name`` wins when given; otherwise every name in ``candidates`` is tried. When
-    several windows match, the one with the largest client area is returned, which skips
-    launcher and tooltip windows.
+    ``process_name`` wins when given; otherwise every name in ``candidates`` is tried. A
+    ``process_name`` that is itself one of the known clients only *prefers* that name: when
+    no window has it, the other known clients are tried, so a profile saying ``Wow.exe``
+    still finds ``World of Warcraft`` on a Mac. When several windows match, the one with the
+    largest client area is returned, which skips launcher and tooltip windows.
     """
     wanted = [process_name] if process_name else list(candidates)
-    wanted_lower = {name.lower() for name in wanted if name}
     needle = title_contains.lower()
-
-    matches = [
+    windows = [
         window
         for window in list_windows()
-        if window.process_name.lower() in wanted_lower
-        and (not needle or needle in window.title.lower())
+        if (not needle or needle in window.title.lower())
         and window.client_rect.width > 0
         and window.client_rect.height > 0
     ]
+
+    def matching(names: Sequence[str]) -> list[WindowInfo]:
+        lowered = {name.lower() for name in names if name}
+        return [window for window in windows if window.process_name.lower() in lowered]
+
+    matches = matching(wanted)
+    known = {name.lower() for name in candidates}
+    if not matches and process_name and process_name.lower() in known:
+        matches = matching(candidates)
     if not matches:
         msg = (
             f"no window found for process {wanted!r}"
@@ -237,6 +262,9 @@ class MssSource:
     def __init__(self, region: Rect, _monitor: MonitorInfo, _target_fps: int) -> None:
         import mss
 
+        # The backend sets mss up for native-resolution frames (macOS asks it to drop its
+        # nominal 1x scaling); idempotent, and the bridge builds this class directly.
+        ensure_dpi_awareness()
         self.region = region
         # mss is not thread-safe; this instance belongs to the thread that built it.
         self._sct = mss.mss()

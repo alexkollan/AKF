@@ -3,9 +3,54 @@
 Goal: WoW Forever running natively on a Mac, with AFK driving it from the same Mac. This
 file is the hand-over from the Windows work; read it after `CLAUDE.md` and `docs/PLAN.md`.
 
-**Open question first:** confirm that WoW Forever has a native macOS client (not Wine or
-CrossOver). Under Wine the game is a Windows process inside a Mac app, and input, focus and
-per-app audio all behave differently; none of the plan below covers that case.
+**Answered:** WoW Forever has a native macOS client (no Wine): the executable is
+`/Applications/World of Warcraft/_forever_/World of Warcraft.app/Contents/MacOS/World of Warcraft`,
+started by the launcher with `-launcherlogin -uid wowf`. Its windows' owner name is `Wow`;
+the engine names the process after the executable, `World of Warcraft`, which is now in
+`DEFAULT_WOW_PROCESSES`. A profile saying `Wow.exe` still finds it (a known client name falls
+back to the other known clients when absent).
+
+## Status on the Mac (2026-11-21, MacBook Air, Apple silicon, macOS 26.2)
+
+The backend is `engine/native/macos/` and is selected for `darwin`. Measured against the live
+client:
+
+| Area | Result |
+| --- | --- |
+| Window discovery | found by process name, title readable with Screen Recording; also when WoW is in another Space |
+| Geometry | points; Retina scale 2.0; fullscreen-windowed client = whole display (1470x956 pt) |
+| Capture (ScreenCaptureKit) | 2940x1912 native frames, ROI crop matches the client crop (mean diff 4.2) |
+| Capture rate | 38 fps on a 400x300-pt ROI, below the 60 fps target: ScreenCaptureKit only sends a frame when the game draws one, so this is likely the game's frame rate. Irrelevant for mode A; revisit with bobber vision |
+| Focus | `focus_window` brings WoW (and its Space) to the front via `AXFrontmost`; `has_focus` costs 0.15 ms |
+| Game audio | ScreenCaptureKit filtered to WoW: 48 kHz stereo float32, 20 ms buffers, continuous (silence included) |
+| Audio isolation | a system sound played by another process: -53 dBFS in the WoW-only stream (just the game's ambience) vs -19 dBFS in the all-apps stream |
+| Audio timestamps | presentation times are on `perf_counter`'s clock: lag 38 ms median, 52 ms max, no drift over 10 s, nothing re-stamped |
+| Hotkey tap | starts with Accessibility + Input Monitoring; sees every press, swallows when asked (tested with a synthetic F19) |
+| Swallowing from WoW | **does not work**: fn+F10/F12 paused and stopped the bot *and* opened bags. The tap removes the event from the Quartz stream (a listen-only tap after it sees nothing), but WoW links GameController and IOKit and reads the physical keyboard from HID, beneath every event tap. Only a virtual HID driver (Karabiner-style) could hide a key from it. On the Mac the bot's hotkeys (and the recorder's marker keys) must be keys WoW has no binding for |
+| Keys in game | `tools.spike --key b`: Feign Death cast (seen in the capture 0.4 s later). `CGEventPost` keycodes reach the game |
+| F10/F12 in game | `engine.run --dry-run` with WoW in front: F10 paused, F12 emergency-stopped. Needs fn held (or "standard function keys" on); without it the keys are volume/mute and never reach the tap |
+| FishBridge | not installed on this Mac yet (`tools.install_addon` finds `_forever_/Interface/AddOns`) |
+| First live session | `engine.run`, mode A on `]`, Windows defaults untouched: 7 casts, 6 bites heard (+12.4 to +13.9 dB), 6 hooked, 0 misses, 0 false bites; bites 14.5-26.8 s after the cast; hook 633 ms after the bite. Stopped with fn+F12 |
+| Bite detection tuning | **pending**: record Mac clips (`tools.record_clip`, 20+ casts), `tools.replay --metrics/--sweep`; one bite came 26.8 s after the cast, past the 25.9 s seen on Windows, so watch `max_wait_ms` (30 s) |
+
+Decisions taken (also in `CLAUDE.md`):
+
+- **Coordinates are points, frames are native pixels.** `MonitorInfo.scale` relates them (2.0 on
+  Retina, 1.0 on Windows). Input, window bounds and ScreenCaptureKit all speak points, and the
+  global point space is continuous across mixed-scale monitors, which pixels are not. `mss` is
+  switched off its nominal 1x mode so both capture paths deliver the same pixels.
+- **FishBridge cells may be 4 or 8 captured pixels** (the game renders at native resolution or
+  at half and is upscaled), so `bridge.decode` tries cell sizes 4, 8 and 2, and the reader grabs
+  a corner big enough for the largest. The strip validates itself, so a wrong size never decodes.
+- **Hotkeys use a Quartz event tap of our own, not pynput:** pynput's macOS keyboard listener
+  calls the Text Input Sources API off the main thread, which recent macOS aborts on.
+- **Focus goes through Accessibility:** `NSWorkspace.frontmostApplication` is only refreshed by
+  the main run loop, which the engine does not run, and plain activation may be declined since
+  macOS 14.
+- **The endpoint fallback is ScreenCaptureKit over every app** (no BlackHole needed): one
+  pseudo-device, "Every app".
+- **Permissions** belong to the app running the engine (the Claude app or Terminal while
+  developing). `tools.permissions [--request]` checks them, plus the function-key setting.
 
 ## Where it stands
 
@@ -49,7 +94,7 @@ Check these first. Anything failing here is a portability bug in the core, not m
 code. (`tools.replay` playback wants PyAudio: `brew install portaudio`, then add `pyaudio`
 for darwin, or switch playback to `sounddevice`.)
 
-## The work: `engine/native/macos/`
+## The work: `engine/native/macos/` (the original plan, now implemented)
 
 Add a `MacPlatform` that satisfies `Platform`, and return it from `native.current()` for
 `darwin`. Add its packages to `pyproject.toml` with `sys_platform == 'darwin'` markers

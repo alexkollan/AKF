@@ -12,6 +12,7 @@ from collections.abc import Callable, Mapping
 from engine.audio import AudioDevice, AudioSource
 from engine.capture import FrameSource, MonitorInfo, Rect, WindowInfo
 from engine.input import MouseButton
+from engine.native import Permission
 from engine.native.windows import display, keyboard_mouse, wasapi
 from engine.native.windows.hotkeys import LowLevelHook
 
@@ -24,6 +25,9 @@ class WindowsPlatform:
 
     def prepare(self) -> None:
         display.ensure_dpi_awareness()
+
+    def permissions(self, *, request: bool = False) -> list[Permission]:
+        return []
 
     def list_monitors(self) -> list[MonitorInfo]:
         return display.list_monitors()

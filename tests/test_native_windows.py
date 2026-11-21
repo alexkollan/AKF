@@ -70,8 +70,9 @@ def hook_of(hotkeys, monkeypatch):
     return hook
 
 
-def send(hook, vk: int, msg: int = WM_KEYDOWN) -> bool:
-    """Feed one event; returns True when it was suppressed."""
+def send(hook, vk: int, msg: int | None = None) -> bool:
+    """Feed one event (a key-down by default); returns True when it was suppressed."""
+    msg = WM_KEYDOWN if msg is None else msg
     try:
         assert hook._filter(msg, SimpleNamespace(vkCode=vk)) is True
     except Suppressed:

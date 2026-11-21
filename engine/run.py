@@ -31,6 +31,7 @@ from engine import clock
 from engine.config import Mode, Profile, list_profiles, load_profile, load_settings
 from engine.fsm import FsmEvent, Status
 from engine.hotkeys import GlobalHotkeys
+from engine.input import InputError
 from engine.session import Session, SessionError
 
 COUNTDOWN_S = 3
@@ -165,7 +166,11 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if hotkeys is not None:
-            hotkeys.start()
+            try:
+                hotkeys.start()
+            except InputError as exc:
+                print(f"error: hotkeys: {exc}", file=sys.stderr)
+                return 2
         session.run()
     except SessionError as exc:
         print(f"error: {exc}", file=sys.stderr)

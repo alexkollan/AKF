@@ -11,6 +11,7 @@ Run it with the game open and visible::
     uv run python -m tools.spike --list          # what windows are open
     uv run python -m tools.spike --key b         # focus WoW and open the bags
     uv run python -m tools.spike --dry-run       # capture only, send nothing
+    uv run python -m tools.spike --no-input --audio 10   # also check the game's audio
 
 Output lands in ``./out``: the ROI crop, the whole client area, and the client with the
 ROI outlined, so the alignment can be checked by eye.
@@ -28,7 +29,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from engine import capture
+from engine import audio as audio_mod
+from engine import capture, clock
 from engine import input as game_input
 from engine.config import CaptureBackend, RoiFraction
 
@@ -63,6 +65,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--fps", type=int, default=60, help="target capture fps")
     parser.add_argument("--bench", type=float, default=2.0, help="benchmark seconds (0 to skip)")
+    parser.add_argument(
+        "--audio",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help="listen to the game this long and check the audio timestamps (0 to skip)",
+    )
     return parser
 
 
@@ -135,14 +144,65 @@ def run_benchmark(
     left, top = window.client_rect.left, window.client_rect.top
     region = capture.Rect(left, top, left + width, top + height).clamped_to(window.client_rect)
 
+    px = window.monitor.to_pixels
     with capture.capture_session(region, window.monitor, backend=backend, target_fps=fps) as src:
         src.grab()  # warm up: the first dxcam frame costs more than the rest
         measured = capture.measure_fps(src, seconds)
         verdict = "PASS" if measured >= BENCH_TARGET_FPS else "BELOW TARGET"
         print(
             f"capture     : {src.backend_name} {region.width}x{region.height} "
+            f"({px(region.width)}x{px(region.height)} px) "
             f"-> {measured:.1f} fps (acceptance >= {BENCH_TARGET_FPS}) {verdict}"
         )
+
+
+def run_audio_check(window: capture.WindowInfo, seconds: float) -> None:
+    """Listen to the game and check that chunk timestamps sit on the shared clock.
+
+    Each chunk's end, ``start_time + t + length``, is compared with when it was read. The
+    lag must be small and positive: negative means the stamps run ahead of the clock (a
+    different timebase), and a lag that grows means they drift.
+    """
+    source = audio_mod.open_audio_source(window.pid)
+    lags: list[float] = []
+    peak = 0.0
+    frames = 0
+    source.start()
+    try:
+        print(f"audio       : {source.name}, {source.sample_rate} Hz, {source.channels} ch")
+        deadline = clock.now() + seconds
+        while clock.now() < deadline:
+            chunk = source.read(timeout=0.5)
+            if chunk is None:
+                continue
+            arrived = clock.now()
+            end = source.start_time + chunk.t + chunk.frames / source.sample_rate
+            lags.append(arrived - end)
+            frames += chunk.frames
+            peak = max(peak, float(np.max(np.abs(chunk.mono()))) if chunk.frames else 0.0)
+    finally:
+        source.close()
+
+    if not lags:
+        print("audio       : NO AUDIO arrived - is the game muted or the permission missing?")
+        return
+    ordered = sorted(lags)
+    median = ordered[len(ordered) // 2] * 1000
+    worst = ordered[-1] * 1000
+    first, last = lags[0] * 1000, lags[-1] * 1000
+    ok = -5 <= median <= 250 and abs(last - first) < 100
+    print(
+        f"audio       : {len(lags)} chunks, {frames / source.sample_rate:.1f} s of samples, "
+        f"peak {audio_mod.to_dbfs(peak):.1f} dBFS"
+    )
+    print(
+        f"audio lag   : median {median:.1f} ms, max {worst:.1f} ms, first {first:.1f} / "
+        f"last {last:.1f} ms -> {'ok' if ok else 'CHECK - timestamps are off the clock'}"
+    )
+    for name in ("dropped", "unstamped"):
+        count = getattr(source, name, 0)
+        if count:
+            print(f"audio       : {count} chunks {name}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -187,11 +247,15 @@ def main(argv: list[str] | None = None) -> int:
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     roi_frame, backend_name = grab_once(roi, window.monitor, backend, args.fps)
     client_frame, _ = grab_once(window.client_rect, window.monitor, backend, args.fps)
-    print(f"backend     : {backend_name}")
+    print(f"backend     : {backend_name}  (scale {window.monitor.scale:g} px per unit)")
 
+    # Frames are in captured pixels: the monitor's scale times the screen coordinates
+    # (2x on a Retina Mac, 1x on Windows).
+    px = window.monitor.to_pixels
     outlined = client_frame.copy()
-    rx, ry = window.screen_to_client(roi.left, roi.top)
-    cv2.rectangle(outlined, (rx, ry), (rx + roi.width - 1, ry + roi.height - 1), (0, 0, 255), 2)
+    rx, ry = (px(value) for value in window.screen_to_client(roi.left, roi.top))
+    rw, rh = px(roi.width), px(roi.height)
+    cv2.rectangle(outlined, (rx, ry), (rx + rw - 1, ry + rh - 1), (0, 0, 255), 2)
 
     save(roi_frame, OUT_DIR / f"spike-{stamp}-roi.png")
     save(client_frame, OUT_DIR / f"spike-{stamp}-client.png")
@@ -199,7 +263,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # The ROI crop must equal the same region cut out of the full client capture; if the
     # two disagree, the DPI or client-origin maths is wrong.
-    cut = client_frame[ry : ry + roi.height, rx : rx + roi.width]
+    cut = client_frame[ry : ry + rh, rx : rx + rw]
     if cut.shape == roi_frame.shape:
         difference = float(np.mean(cv2.absdiff(cut, roi_frame)))
         print(
@@ -211,6 +275,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.bench > 0:
         run_benchmark(window, backend, args.fps, args.bench)
+
+    if args.audio > 0:
+        try:
+            run_audio_check(window, args.audio)
+        except audio_mod.AudioError as exc:
+            print(f"audio       : FAILED - {exc}")
 
     return 0
 

@@ -19,12 +19,12 @@ grind-bot features now.
 
 | Layer | Choice |
 | --- | --- |
-| Runtime | Python 3.12 on Windows 10/11 (macOS port in progress, `docs/MACOS_PORT.md`), managed by `uv` |
-| Screen capture | `dxcam` (DXGI), `mss` fallback |
+| Runtime | Python 3.12 on Windows 10/11 and macOS 13+ (`docs/MACOS_PORT.md`), managed by `uv` |
+| Screen capture | `dxcam` (DXGI) / ScreenCaptureKit (`pyobjc`), `mss` fallback |
 | Vision | `opencv-python` + `numpy` |
-| Audio | `PyAudioWPatch` (WASAPI loopback) |
-| Input | `SendInput` scancodes via `ctypes`, `pywin32` for windows and focus |
-| Global hotkeys | `pynput` |
+| Audio | `PyAudioWPatch` (WASAPI loopback) / ScreenCaptureKit app audio |
+| Input | `SendInput` scancodes via `ctypes`, `pywin32` / `CGEventPost` keycodes, Accessibility |
+| Global hotkeys | `pynput` low-level hook / a Quartz event tap |
 | Service | `FastAPI` + one WebSocket on `uvicorn`, `pydantic` for config |
 | UI | React 19 + Vite + TypeScript, Tailwind v4, shadcn/ui, Zustand, Recharts |
 | Desktop shell | `pywebview` loading the UI from localhost |
@@ -41,6 +41,8 @@ engine/
   audio.py          AudioChunk/AudioSource, source selection, wav files, splash detector
   native/           the only OS-specific code: the Platform protocol and its backends
     windows/        dxcam, SendInput, WASAPI + process loopback (COM), keyboard hook
+    macos/          Quartz windows + CGEvent input, ScreenCaptureKit audio/capture, event
+                    tap, permissions
     unsupported.py  any other OS until it has a backend: portable parts work, rest errors
   clips.py          recorded-clip format: writer, loader, frame reader, cast segments
   clock.py          the one high-resolution clock (QPC) everything is stamped with
@@ -67,6 +69,7 @@ tools/
   listen.py         live splash detector: prints BITE while you fish by hand
   spike.py          hardware smoke test (capture + input) against a live client
   install_addon.py  copies addon/FishBridge into the game's Interface/AddOns
+  permissions.py    checks (and requests) the OS permissions the engine needs (macOS)
 tests/fixtures/     recorded clips, labelled
 addon/FishBridge/   the optional Lua addon (Interface 16001)
 docs/PLAN.md        the specification; milestones M0-M7
@@ -80,7 +83,8 @@ uv sync                      # install/refresh the Python environment
 uv run pytest                # tests (fixture-backed; none need the game)
 uv run ruff check .          # lint
 uv run ruff format .         # format
-uv run python -m tools.spike # capture + input smoke test, needs WoW running
+uv run python -m tools.permissions --request  # macOS: what is granted, prompt for the rest
+uv run python -m tools.spike # capture + input smoke test, needs WoW running (--audio 10: sound)
 uv run python -m tools.record_clip --name <spot> --tags night,sea  # record fixtures
 uv run python -m tools.replay [clip]  # list fixtures, or play one with markers
 uv run python -m tools.replay --metrics   # score the bite detector on all fixtures
@@ -129,9 +133,11 @@ audio, global hotkeys); `engine.native.current()` picks one lazily, so importing
 module never loads `pywin32`, `dxcam`, `comtypes` or `PyAudioWPatch`. Code outside `native/`
 uses the facades (`engine.capture`, `engine.input`, `engine.audio`, `engine.hotkeys`), names
 keys by their portable names (`engine.keys`), and never imports a backend directly.
-Windows-only packages carry a `sys_platform == 'win32'` marker in `pyproject.toml`.
-`tests/test_portability.py` blocks every Windows library and runs a simulated session; keep it
-green. The macOS backend is the next step: `docs/MACOS_PORT.md`.
+Windows-only packages carry a `sys_platform == 'win32'` marker in `pyproject.toml`, macOS-only
+ones (`pyobjc-framework-*`) `sys_platform == 'darwin'`. `tests/test_portability.py` blocks every
+Windows and macOS library and runs a simulated session; keep it green. Each backend has its own
+test file (`test_native_windows.py`, `test_native_macos.py`) that skips on the other OS. Status
+and details of the macOS backend: `docs/MACOS_PORT.md`.
 
 **Clock.** Everything that gets compared in time — frames, audio chunks, markers, input
 actions — is stamped with `engine.clock.now()` (`perf_counter`, QPC, 100 ns). On Windows
@@ -139,7 +145,9 @@ actions — is stamped with `engine.clock.now()` (`perf_counter`, QPC, 100 ns). 
 anything timed. WASAPI packet timestamps are QPC too (`clock.from_qpc`), so audio, video and
 hotkeys share one timeline.
 
-**Audio source.** The default is **process loopback** (`engine.native.windows.process_loopback`): it captures
+**Audio source.** The default is **process loopback** (`engine.native.windows.process_loopback`;
+on macOS a ScreenCaptureKit stream filtered to the game's app, `engine.native.macos.screencapturekit`,
+whose buffers are stamped on the host clock that `perf_counter` reads): it captures
 `Wow.exe` alone, so Discord, music or a browser can never fake a bite. It is driven through COM
 with `comtypes` on its own MTA thread, and its chunks carry exact QPC capture times.
 `engine.audio.open_audio_source(pid)` picks it and falls back to **endpoint loopback**
@@ -167,14 +175,28 @@ in-game (landing 0.6-1.3 s, bites 6.8-25.9 s after the cast key); change them fr
 changes made while running take effect at the next cast. Mode B and pixel fusion are refused
 for a real game until bobber vision exists.
 
-**Coordinates.** All geometry is relative to the WoW *client area*, in physical pixels. The
-process is per-monitor DPI aware (`SetProcessDpiAwarenessContext`), so two monitors with
-different scaling still land a right-click in the right place. Profiles store ROIs as
-fractions of the client area so they survive a resolution change; conversion to pixels happens
-once per capture session.
+**Coordinates.** All geometry is relative to the WoW *client area*, in the OS's global screen
+space: **physical pixels on Windows** (the process is per-monitor DPI aware,
+`SetProcessDpiAwarenessContext`) and **points on macOS** (the Quartz display space: top-left of
+the main display, y down — what window bounds, `CGEvent` and ScreenCaptureKit all take). Either
+way two monitors with different scaling still land a right-click in the right place. **Frames
+are always native pixels**: `MonitorInfo.scale` is captured pixels per coordinate unit (2.0 on
+a Retina display, always 1.0 on Windows), so a 400x300-point ROI arrives as an 800x600 frame;
+anything mapping a frame position back to the screen divides by it (`MonitorInfo.to_pixels`
+goes the other way). The macOS backend switches `mss` off its nominal 1x mode for this. Profiles
+store ROIs as fractions of the client area so they survive a resolution change; conversion
+happens once per capture session.
 
-**Focus.** `SendInput` goes to whatever window has focus. The engine focuses WoW on start,
+**Focus.** Synthetic input goes to whatever window has focus. The engine focuses WoW on start,
 auto-pauses when WoW loses focus, and the UI window never steals focus while a session runs.
+On macOS focus is read and set through Accessibility (`AXFocusedApplication`, `AXFrontmost`):
+`NSWorkspace.frontmostApplication` goes stale in a process without an AppKit run loop.
+
+**macOS permissions.** Screen Recording (audio, titles, capture), Accessibility (input, focus,
+swallowing hotkeys) and Input Monitoring belong to the *app* running the engine — the terminal
+while developing — and take effect after it restarts. `tools.permissions` checks them. F-keys
+reach the hotkey tap only with "Use F1, F2, etc. keys as standard function keys" on (or fn
+held). Missing permissions are errors with a message, never silent no-ops.
 
 **Timing.** Fixed delays are jittered (`TimingConfig.jitter_ms`). Anything measurable — land
 delay, channel duration — is measured in the calibration wizard and stored in the profile, not
@@ -231,8 +253,9 @@ by the agent. Write the tool, say exactly how to run it, and wait for the result
 ## Engine service
 
 `engine.server` is the long-running process the UI talks to. Commands from the WebSocket and
-the global hotkeys (F9 start/stop, F10 pause, F12 emergency stop — all swallowed before WoW
-sees them) go to the same `Controller` methods. The controller runs one `Session` at a time on
+the global hotkeys (F9 start/stop, F10 pause, F12 emergency stop — on Windows swallowed before
+WoW sees them; on macOS WoW reads the physical keyboard through GameController/HID, beneath any
+event tap, so there they must be keys WoW leaves unbound) go to the same `Controller` methods. The controller runs one `Session` at a time on
 a worker thread and turns everything into wire events on a thread-safe queue that the server
 pumps every 50 ms; a client that connects late gets a snapshot first. Only the UI's origins
 (and origin-less local clients) may connect. Emergency stop is a request the session applies

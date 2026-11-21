@@ -260,7 +260,7 @@ class Profile(Model):
 
 
 class Hotkeys(Model):
-    """Global hotkeys, registered with pynput so they fire while WoW has focus."""
+    """Global hotkeys, from the OS's keyboard hook so they fire while WoW has focus."""
 
     start_stop: str = "<f9>"
     pause: str = "<f10>"

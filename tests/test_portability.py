@@ -1,10 +1,9 @@
 """The portable core must import and run on an OS without a native backend.
 
-A subprocess makes every Windows-only library unimportable, selects the backend a Mac gets
-today, then
-imports the engine, the service and the tools and runs a simulated session. If any portable
-module grows a top-level ``import win32gui`` (or similar) again, this fails on Windows too —
-long before anyone tries the code on a Mac.
+A subprocess makes every Windows- and macOS-only library unimportable, selects the
+placeholder backend, then imports the engine, the service and the tools and runs a
+simulated session. If any portable module grows a top-level ``import win32gui`` or
+``import Quartz`` again, this fails on every OS, long before it reaches the other one.
 """
 
 import subprocess
@@ -27,7 +26,10 @@ SCRIPT = textwrap.dedent(
     import sys
 
     BLOCKED = {"win32api", "win32con", "win32gui", "win32process", "pywintypes",
-               "dxcam", "comtypes", "pyaudiowpatch"}
+               "dxcam", "comtypes", "pyaudiowpatch",
+               # the macOS backend's pyobjc frameworks
+               "objc", "AppKit", "Foundation", "Quartz", "ApplicationServices",
+               "ScreenCaptureKit", "CoreMedia", "pynput"}
 
     class Block(importlib.abc.MetaPathFinder):
         def find_spec(self, name, path=None, target=None):
@@ -47,7 +49,8 @@ SCRIPT = textwrap.dedent(
 
     import engine.app, engine.calibration, engine.clips, engine.controller  # noqa: F401
     import engine.run, engine.server, engine.session  # noqa: F401
-    import tools.listen, tools.metrics, tools.record_clip  # noqa: F401
+    import tools.listen, tools.metrics, tools.permissions, tools.record_clip  # noqa: F401
+    import tools.install_addon, tools.spike  # noqa: F401
     from engine.clock import SimClock
     from engine.config import Profile
     from engine.session import Session

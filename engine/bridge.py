@@ -14,6 +14,7 @@ on it simply do not apply — the bot keeps fishing exactly as it does without t
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -25,6 +26,12 @@ logger = logging.getLogger(__name__)
 
 CELL_PX = 4
 CELLS = 4
+#: Captured pixels per addon pixel that :func:`decode` tries, in order. The addon paints in
+#: the game's render pixels; on Windows those are screen pixels (1). On a Retina Mac the
+#: game may render at native resolution (1) or at half of it and be upscaled (2); a capture
+#: at nominal resolution would halve the cells instead. The strip validates itself (magic
+#: cell, version, end marker), so trying each size cannot mistake one for another.
+CELL_SCALES: tuple[float, ...] = (1, 2, 0.5)
 VERSION = 1
 END_MARKER = 170
 
@@ -65,19 +72,32 @@ class BridgeState:
         )
 
 
-def _cell_centre(index: int) -> tuple[int, int]:
+def _cell_centre(index: int, cell: int = CELL_PX) -> tuple[int, int]:
     """(row, column) of the pixel sampled for a cell: its centre, away from edge blending."""
-    return CELL_PX // 2, index * CELL_PX + CELL_PX // 2
+    return cell // 2, index * cell + cell // 2
 
 
 def decode(strip: np.ndarray) -> BridgeState | None:
-    """Decode a BGR image whose top-left corner is the strip; ``None`` if it is not there."""
-    if strip.ndim != 3 or strip.shape[0] < CELL_PX or strip.shape[1] < CELLS * CELL_PX:
+    """Decode a BGR image whose top-left corner is the strip; ``None`` if it is not there.
+
+    Each size in :data:`CELL_SCALES` is tried until one reads as a valid strip.
+    """
+    if strip.ndim != 3:
+        return None
+    for scale in CELL_SCALES:
+        state = _decode_at(strip, max(1, round(CELL_PX * scale)))
+        if state is not None:
+            return state
+    return None
+
+
+def _decode_at(strip: np.ndarray, cell: int) -> BridgeState | None:
+    if strip.shape[0] < cell or strip.shape[1] < CELLS * cell:
         return None
 
     cells = []
     for index in range(CELLS):
-        row, column = _cell_centre(index)
+        row, column = _cell_centre(index, cell)
         blue, green, red = (int(value) for value in strip[row, column, :3])
         cells.append((red, green, blue))
 
@@ -187,7 +207,16 @@ class BridgeReader:
 
     @staticmethod
     def _screen_grabber(window: capture.WindowInfo) -> Callable[[], np.ndarray | None]:
+        """Grab the client's top-left corner, big enough for the largest cell size tried.
+
+        The region is in screen coordinates and the frame in captured pixels, so the size
+        is divided by the monitor's scale (points on a Retina Mac, pixels elsewhere).
+        """
+        largest = CELL_PX * max(CELL_SCALES)
+        scale = max(window.monitor.scale, 1e-6)
+        width = math.ceil(CELLS * largest / scale)
+        height = math.ceil(largest / scale)
         left, top = window.client_rect.left, window.client_rect.top
-        region = capture.Rect(left, top, left + CELLS * CELL_PX, top + CELL_PX)
+        region = capture.Rect(left, top, left + width, top + height)
         source = capture.MssSource(region, window.monitor, 0)
         return source.grab

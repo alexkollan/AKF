@@ -111,3 +111,26 @@ def test_reader_only_grabs_at_its_interval():
     for step in range(10):
         reader.poll(step * 0.01)  # ten ticks inside 0.1 s
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("factor", [2, 3])
+def test_strip_rendered_larger_is_read(factor):
+    """A Retina Mac whose game renders at half resolution shows every cell twice as big."""
+    big = np.repeat(np.repeat(encode(FULL), factor, axis=0), factor, axis=1)
+    if factor == 3:
+        assert decode(big) is None  # not a size the addon can produce
+    else:
+        assert decode(big) == FULL
+
+
+def test_strip_captured_at_half_resolution_is_read():
+    small = encode(FULL)[::2, ::2]
+    assert decode(small) == FULL
+
+
+def test_a_larger_grab_still_reads_a_normal_strip():
+    """The reader grabs room for the largest cells; a 1x strip sits in its corner."""
+    canvas = np.full((CELL_PX * 2, CELL_PX * 8, 3), 30, dtype=np.uint8)
+    strip = encode(FULL)
+    canvas[: strip.shape[0], : strip.shape[1]] = strip
+    assert decode(canvas) == FULL

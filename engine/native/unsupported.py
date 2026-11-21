@@ -17,6 +17,7 @@ from typing import NoReturn
 from engine.audio import AudioDevice, AudioError, AudioSource
 from engine.capture import CaptureError, FrameSource, MonitorInfo, Rect, WindowInfo
 from engine.input import InputError, MouseButton
+from engine.native import Permission
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,9 @@ class UnsupportedPlatform:
 
     def prepare(self) -> None:
         return None
+
+    def permissions(self, *, request: bool = False) -> list[Permission]:
+        return []
 
     def list_monitors(self) -> list[MonitorInfo]:
         """Monitors as ``mss`` sees them. Index 0 of ``mss.monitors`` is the union; skip it."""

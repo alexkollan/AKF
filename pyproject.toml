@@ -18,6 +18,11 @@ dependencies = [
     "comtypes>=1.4; sys_platform == 'win32'",
     "pyaudiowpatch>=0.2.12.7; sys_platform == 'win32'",
     "pywin32>=306; sys_platform == 'win32'",
+    # The macOS backend (engine/native/macos). Nothing outside it imports these.
+    "pyobjc-framework-quartz>=10.3; sys_platform == 'darwin'",
+    "pyobjc-framework-cocoa>=10.3; sys_platform == 'darwin'",
+    "pyobjc-framework-screencapturekit>=10.3; sys_platform == 'darwin'",
+    "pyobjc-framework-coremedia>=10.3; sys_platform == 'darwin'",
 ]
 
 [dependency-groups]

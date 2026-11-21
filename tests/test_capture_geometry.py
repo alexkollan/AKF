@@ -58,3 +58,35 @@ def test_roi_never_degenerates():
     roi = roi_to_screen(client, RoiFraction(x=0.0, y=0.0, w=0.011, h=0.011))
     assert roi.width >= 1
     assert roi.height >= 1
+
+
+def _window(name: str, width: int = 1470, height: int = 956):
+    from engine.capture import MonitorInfo, WindowInfo
+
+    monitor = MonitorInfo(0, "m", 1, Rect(0, 0, 3000, 2000), Rect(0, 0, 3000, 2000), True)
+    rect = Rect(0, 0, width, height)
+    return WindowInfo(1, 1, name, "", rect, rect, monitor)
+
+
+def test_a_known_client_name_also_finds_the_other_clients(monkeypatch):
+    """A profile saying Wow.exe still finds the Mac client, "World of Warcraft"."""
+    from engine import capture
+
+    monkeypatch.setattr(capture, "list_windows", lambda: [_window("World of Warcraft")])
+    assert capture.find_game_window("Wow.exe").process_name == "World of Warcraft"
+
+
+def test_the_exact_name_wins_when_it_is_there(monkeypatch):
+    from engine import capture
+
+    windows = [_window("WowClassic.exe", 3000, 2000), _window("Wow.exe")]
+    monkeypatch.setattr(capture, "list_windows", lambda: windows)
+    assert capture.find_game_window("Wow.exe").process_name == "Wow.exe"
+
+
+def test_an_unknown_name_does_not_fall_back(monkeypatch):
+    from engine import capture
+
+    monkeypatch.setattr(capture, "list_windows", lambda: [_window("World of Warcraft")])
+    with pytest.raises(capture.WindowNotFoundError):
+        capture.find_game_window("Notepad.exe")

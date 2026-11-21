@@ -8,14 +8,16 @@ list; each operating system implements it once.
 
 * ``engine.native.windows`` — the original engine: DXGI, ``SendInput``, WASAPI, a
   low-level keyboard hook.
+* ``engine.native.macos`` — Quartz windows and events, ScreenCaptureKit for game-only
+  audio and capture, a Quartz event tap.
 * ``engine.native.unsupported`` — any other OS until it has a real backend. Portable
   pieces keep working (``mss`` capture, simulated sessions, the UI); anything that needs
   the game raises a clear error instead of an ``ImportError``.
 
 The public modules (``engine.capture``, ``engine.input``, ``engine.audio``,
 ``engine.hotkeys``) are the facade; nothing outside them should import from here, and
-backends are imported lazily so that ``import engine.capture`` never loads ``pywin32`` on a
-machine that does not have it.
+backends are imported lazily so that ``import engine.capture`` never loads ``pywin32`` or
+``pyobjc`` on a machine that does not have it.
 """
 
 from __future__ import annotations
@@ -23,12 +25,25 @@ from __future__ import annotations
 import functools
 import sys
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from engine.audio import AudioDevice, AudioSource
     from engine.capture import FrameSource, MonitorInfo, Rect, WindowInfo
     from engine.input import MouseButton
+
+
+@dataclass(frozen=True, slots=True)
+class Permission:
+    """One operating-system permission the engine needs, and whether it is granted."""
+
+    name: str
+    granted: bool
+    #: What it is for, from the player's side.
+    needed_for: str
+    #: Where to grant it.
+    how: str
 
 
 class HotkeyHook(Protocol):
@@ -50,7 +65,14 @@ class Platform(Protocol):
     # -- display -----------------------------------------------------------------------
 
     def prepare(self) -> None:
-        """One-time process setup (DPI awareness on Windows). Safe to call repeatedly."""
+        """One-time process setup (DPI awareness on Windows, native-resolution mss on
+        macOS). Safe to call repeatedly."""
+
+    def permissions(self, *, request: bool = False) -> list[Permission]:
+        """The OS permissions the engine needs; empty when the OS asks for none.
+
+        With ``request`` the OS is asked to show its own prompts for missing ones.
+        """
 
     def list_monitors(self) -> list[MonitorInfo]: ...
 
@@ -114,6 +136,10 @@ def current() -> Platform:
         from engine.native.windows import WindowsPlatform
 
         return WindowsPlatform()
+    if sys.platform == "darwin":
+        from engine.native.macos import MacPlatform
+
+        return MacPlatform()
     from engine.native.unsupported import UnsupportedPlatform
 
     return UnsupportedPlatform(sys.platform)

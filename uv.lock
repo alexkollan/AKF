@@ -17,6 +17,10 @@ dependencies = [
     { name = "pyaudiowpatch", marker = "sys_platform == 'win32'" },
     { name = "pydantic" },
     { name = "pynput" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-coremedia", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-screencapturekit", marker = "sys_platform == 'darwin'" },
     { name = "pywebview" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "uvicorn", extra = ["standard"] },
@@ -41,6 +45,10 @@ requires-dist = [
     { name = "pyaudiowpatch", marker = "sys_platform == 'win32'", specifier = ">=0.2.12.7" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pynput", specifier = ">=1.7.7" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'", specifier = ">=10.3" },
+    { name = "pyobjc-framework-coremedia", marker = "sys_platform == 'darwin'", specifier = ">=10.3" },
+    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'", specifier = ">=10.3" },
+    { name = "pyobjc-framework-screencapturekit", marker = "sys_platform == 'darwin'", specifier = ">=10.3" },
     { name = "pywebview", specifier = ">=5.3" },
     { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=306" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
@@ -532,6 +540,19 @@ wheels = [
 ]
 
 [[package]]
+name = "pyobjc-framework-coremedia"
+version = "13.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyobjc-core" },
+    { name = "pyobjc-framework-cocoa" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/10/f6/3ccdac27fd6a2a94ae122b807a6f0512076614b85265559a9055996b5839/pyobjc_framework_coremedia-13.0.tar.gz", hash = "sha256:d95ef87f6f33ec98347439284f0add1f7d1d019b88cb8e218e81b39aec14d324", size = 99534, upload-time = "2026-10-30T10:46:14.941Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/25/f8/3086f9c4b57345f8c96b456c0d6cfdc0e5a6d16483579a8c68657a4e0cb9/pyobjc_framework_coremedia-13.0-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:edb151ff50868a16705228bf2f21348466156a8dc3ba9a2a093d2e0f0ca16a24", size = 29283, upload-time = "2026-10-30T10:36:18.734Z" },
+]
+
+[[package]]
 name = "pyobjc-framework-coretext"
 version = "13.0"
 source = { registry = "https://pypi.org/simple" }
@@ -556,6 +577,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/7a/86/ffaa76ca28df5450cce14614c657b910bbd7bb737feaf47f74230c3b78d3/pyobjc_framework_quartz-13.0.tar.gz", hash = "sha256:b9a4942182efbbc7e18e6cb7f5a8faa166dc2fc5e33bece7c7b1355494274add", size = 3399243, upload-time = "2026-10-30T10:47:23.667Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/73/f9/be94503cc5475a076b61b65b64ccb030a2b72bf6fddbe68bae1f20d9e624/pyobjc_framework_quartz-13.0-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:5e1d49f2699d128553a52fad473622ff4fd424d05e879d9585dad0a9f7c3dcfd", size = 215360, upload-time = "2026-10-30T10:42:34.247Z" },
+]
+
+[[package]]
+name = "pyobjc-framework-screencapturekit"
+version = "13.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyobjc-core" },
+    { name = "pyobjc-framework-cocoa" },
+    { name = "pyobjc-framework-coremedia" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/50/b3/2a38e35a2d0b7703e6a3c0a03c4e4854f1ea700b930ad50cf8fe34de1aec/pyobjc_framework_screencapturekit-13.0.tar.gz", hash = "sha256:036ee91a5566c053117120c423c747becdd803906dae1822c537ea61af976273", size = 40818, upload-time = "2026-10-30T10:47:29.126Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/9d/39068c09224662cb5ff6f29b723e5200154ec55b95ab8f3ff4a09676473e/pyobjc_framework_screencapturekit-13.0-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:e5f0f68ed43b4488474269b374e396a3aca7829045ce5f589dfc1358ba64c0a6", size = 12738, upload-time = "2026-10-30T10:43:11.519Z" },
 ]
 
 [[package]]

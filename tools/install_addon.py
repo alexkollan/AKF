@@ -5,8 +5,10 @@
     uv run python -m tools.install_addon --dir "D:/Games/WoW/_retail_/Interface/AddOns"
 
 With the game running, the AddOns folder is found next to its executable
-(``<game folder>/Interface/AddOns``). Without it, pass ``--dir``. An older copy of
-FishBridge there is replaced; nothing else in the folder is touched. Reload the UI in game
+(``<game folder>/Interface/AddOns``; on macOS the game folder is the one holding
+``World of Warcraft.app``, e.g. ``/Applications/World of Warcraft/_forever_``). Without
+it, pass ``--dir``. An older copy of FishBridge there is replaced; nothing else in the
+folder is touched. Reload the UI in game
 (``/reload``) or restart it, and enable FishBridge in the AddOns list if it is off.
 """
 
@@ -22,13 +24,22 @@ from engine import capture
 ADDON = Path(__file__).resolve().parents[1] / "addon" / "FishBridge"
 
 
+def game_folder(executable: Path) -> Path:
+    """The folder holding ``Interface/``: next to ``Wow.exe`` on Windows, next to
+    ``World of Warcraft.app`` on macOS (the executable sits inside the bundle)."""
+    for parent in executable.parents:
+        if parent.suffix == ".app":
+            return parent.parent
+    return executable.parent
+
+
 def addons_dir_from_game(process_name: str | None) -> Path:
     window = capture.find_game_window(process_name)
     exe = capture.process_path(window.pid)
     if not exe:
         msg = "could not read where the game is installed; pass --dir"
         raise capture.CaptureError(msg)
-    return Path(exe).parent / "Interface" / "AddOns"
+    return game_folder(Path(exe)) / "Interface" / "AddOns"
 
 
 def main(argv: list[str] | None = None) -> int:
