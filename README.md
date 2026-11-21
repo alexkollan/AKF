@@ -1,4 +1,4 @@
-# AFK for WoW Forever
+# AKF for WoW Forever
 
 Fishes for you in World of Warcraft Forever. It listens to the game for the splash of a
 bite, reels in, and casts again; a control panel on your second monitor shows what it hears
@@ -9,9 +9,19 @@ and lets you set everything up. The full specification is in `docs/PLAN.md`.
 
 ## What you need
 
-- Windows 10 2004 or later (Windows 11 recommended), with WoW Forever (`Wow.exe`).
-  macOS is not supported yet; the port is planned in `docs/MACOS_PORT.md`.
-- [uv](https://docs.astral.sh/uv/) and Node.js 22 or later.
+New to all this? Follow the step-by-step guide for your computer, from installing the
+tools to the first cast:
+
+- **Windows:** [docs/INSTALL_WINDOWS.md](docs/INSTALL_WINDOWS.md)
+- **Mac:** [docs/INSTALL_MACOS.md](docs/INSTALL_MACOS.md)
+
+In short:
+
+- Windows 10 2004 or later (Windows 11 recommended), or macOS 13 or later, with WoW Forever.
+- [uv](https://docs.astral.sh/uv/) (it installs Python 3.12 itself) and Node.js 22 or later.
+- On a Mac, the app you run it from needs Screen Recording, Accessibility and Input
+  Monitoring (`uv run python -m tools.permissions --request`), and WoW's bag keys F8-F12
+  must be unbound (the Mac guide shows how). Details in `docs/MACOS_PORT.md`.
 
 ```bash
 uv sync
@@ -28,7 +38,9 @@ uv run python -m engine.app
 The control panel opens on your second screen. Press **Start fishing** with your character
 at the water and a fishing pole equipped; WoW comes to the front and the bot takes over.
 
-These keys work while WoW is in front, and WoW never sees them:
+These keys work while WoW is in front. On Windows WoW never sees them; on a Mac it does
+(it reads the keyboard directly), which is why the bag keys must be unbound there, and you
+hold **fn** to press them:
 
 | Key | Does |
 | --- | --- |

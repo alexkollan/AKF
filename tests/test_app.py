@@ -26,8 +26,8 @@ SECOND = MonitorInfo(
 MONITORS = [PRIMARY, SECOND]
 
 
-def test_window_title_is_afk():
-    assert TITLE == "AFK"
+def test_window_title_is_akf():
+    assert TITLE == "AKF"
 
 
 def test_default_opens_centred_on_the_second_monitor():

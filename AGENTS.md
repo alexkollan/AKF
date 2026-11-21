@@ -1,4 +1,4 @@
-# AGENTS.md — AFK
+# AGENTS.md — AKF
 
 A fishing bot for WoW Forever: a Python engine that sees, hears and acts, plus a React UI
 that runs on the second monitor. The full specification is `docs/PLAN.md` — read it before

@@ -12,9 +12,9 @@ if str(ROOT) not in sys.path:
 
 @pytest.fixture(autouse=True)
 def isolated_config_dir(tmp_path, monkeypatch):
-    """Never read or write the real %APPDATA%/AFK during tests."""
-    monkeypatch.setenv("AFK_CONFIG_DIR", str(tmp_path / "AFK"))
-    return tmp_path / "AFK"
+    """Never read or write the real %APPDATA%/AKF during tests."""
+    monkeypatch.setenv("AKF_CONFIG_DIR", str(tmp_path / "AKF"))
+    return tmp_path / "AKF"
 
 
 @pytest.fixture

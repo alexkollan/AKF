@@ -11,10 +11,46 @@ def test_defaults_are_valid():
     assert 0.0 < profile.detection.search_roi.w <= 1.0
 
 
-def test_config_directory_uses_afk_brand(monkeypatch, tmp_path):
-    monkeypatch.delenv("AFK_CONFIG_DIR", raising=False)
+def test_config_directory_uses_akf_brand(monkeypatch, tmp_path):
+    monkeypatch.delenv("AKF_CONFIG_DIR", raising=False)
     monkeypatch.setenv("APPDATA", str(tmp_path))
-    assert cfg.config_dir() == tmp_path / "AFK"
+    assert cfg.config_dir() == tmp_path / "AKF"
+
+
+@pytest.mark.parametrize("legacy", cfg.LEGACY_CONFIG_DIR_NAMES)
+def test_an_older_settings_folder_is_moved_once(monkeypatch, tmp_path, legacy):
+    monkeypatch.delenv("AKF_CONFIG_DIR", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    old = tmp_path / legacy
+    (old / "profiles").mkdir(parents=True)
+    (old / "profiles" / "spot.json").write_text("{}", encoding="utf-8")
+
+    assert cfg.config_dir() == tmp_path / "AKF"
+    assert (tmp_path / "AKF" / "profiles" / "spot.json").read_text(encoding="utf-8") == "{}"
+    assert not old.exists()
+
+
+def test_the_current_folder_wins_over_an_older_one(monkeypatch, tmp_path):
+    monkeypatch.delenv("AKF_CONFIG_DIR", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    (tmp_path / "AKF").mkdir()
+    (tmp_path / cfg.LEGACY_CONFIG_DIR_NAMES[0]).mkdir()
+
+    assert cfg.config_dir() == tmp_path / "AKF"
+    assert (tmp_path / cfg.LEGACY_CONFIG_DIR_NAMES[0]).exists()  # left alone
+
+
+def test_a_failed_move_keeps_using_the_old_folder(monkeypatch, tmp_path):
+    monkeypatch.delenv("AKF_CONFIG_DIR", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    old = tmp_path / cfg.LEGACY_CONFIG_DIR_NAMES[0]
+    old.mkdir()
+
+    def refuse(self, target):
+        raise PermissionError("in use")
+
+    monkeypatch.setattr(type(old), "rename", refuse)
+    assert cfg.config_dir() == old
 
 
 def test_unknown_key_is_rejected():

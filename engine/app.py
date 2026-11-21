@@ -35,7 +35,7 @@ from engine import config as cfg
 from engine.server import UI_DIST, build_controller, create_app
 
 DEV_URL = "http://localhost:5173"
-TITLE = "AFK"
+TITLE = "AKF"
 MIN_SIZE = (960, 640)
 BACKGROUND = "#0E1A21"  # the UI's abyss, so the window never flashes white while loading
 STARTUP_TIMEOUT_S = 10.0
@@ -107,7 +107,7 @@ def remember(window: webview.Window, controller_settings: cfg.Settings) -> cfg.S
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="AFK", description=__doc__)
+    parser = argparse.ArgumentParser(prog="AKF", description=__doc__)
     parser.add_argument("--dev", action="store_true", help=f"load the UI from {DEV_URL}")
     parser.add_argument("--simulate", action="store_true", help="no game: simulated sessions")
     parser.add_argument("--dry-run", action="store_true", help="log keys instead of pressing")
@@ -133,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
             log_level="warning",
         )
     )
-    thread = threading.Thread(target=server.run, name="AFK-engine-server", daemon=True)
+    thread = threading.Thread(target=server.run, name="AKF-engine-server", daemon=True)
     thread.start()
     deadline = time.monotonic() + STARTUP_TIMEOUT_S
     while not server.started:

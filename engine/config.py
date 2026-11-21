@@ -2,7 +2,7 @@
 
 A *profile* is everything that is tied to a fishing spot and a client setup: mode, key
 bindings, lures, detection thresholds, ROI and stop conditions. Profiles live as JSON in
-``%APPDATA%/AFK/profiles``. *Settings* are machine-wide and live next to them.
+``%APPDATA%/AKF/profiles``. *Settings* are machine-wide and live next to them.
 
 Every field has a default, so a fresh install starts from a working configuration and the
 UI can offer "Reset to defaults" per screen.
@@ -11,6 +11,7 @@ UI can offer "Reset to defaults" per screen.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from datetime import UTC, datetime
@@ -19,6 +20,8 @@ from pathlib import Path
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------------------
 # primitives
@@ -298,14 +301,47 @@ class Settings(Model):
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9 _.\-]")
 
 
+#: The settings folder's name under ``%APPDATA%`` (Windows) or ``~/.config`` (elsewhere).
+CONFIG_DIR_NAME = "AKF"
+#: Names earlier builds used for that folder, newest first: the brand with two letters
+#: swapped, and the project's working title before it. The first one found is moved to
+#: :data:`CONFIG_DIR_NAME` once, so an update keeps the player's profiles and settings.
+LEGACY_CONFIG_DIR_NAMES: tuple[str, ...] = ("AFK", "fishbot")
+
+
 def config_dir() -> Path:
-    """``%APPDATA%/AFK``, overridable with ``AFK_CONFIG_DIR`` for tests."""
-    override = os.environ.get("AFK_CONFIG_DIR")
+    """``%APPDATA%/AKF``, overridable with ``AKF_CONFIG_DIR`` for tests."""
+    override = os.environ.get("AKF_CONFIG_DIR")
     if override:
         return Path(override)
     appdata = os.environ.get("APPDATA")
     base = Path(appdata) if appdata else Path.home() / ".config"
-    return base / "AFK"
+    current = base / CONFIG_DIR_NAME
+    if current.exists():
+        return current
+    return _adopt_legacy_dir(base, current)
+
+
+def _adopt_legacy_dir(base: Path, current: Path) -> Path:
+    """Move an older build's settings folder to ``current``; return the folder to use.
+
+    When the move fails (the folder is in use, say), the old folder keeps being used rather
+    than starting over from defaults.
+    """
+    for name in LEGACY_CONFIG_DIR_NAMES:
+        old = base / name
+        if not old.is_dir():
+            continue
+        try:
+            old.rename(current)
+        except OSError as exc:
+            logger.warning(
+                "could not move settings from %s to %s (%s); using %s", old, current, exc, old
+            )
+            return old
+        logger.info("moved settings from %s to %s", old, current)
+        return current
+    return current
 
 
 def profiles_dir() -> Path:

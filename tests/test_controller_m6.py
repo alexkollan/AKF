@@ -117,7 +117,7 @@ def test_a_stop_by_itself_is_announced_on_the_webhook(webhook):
     assert arrived.wait(5)
     assert received[0]["reason"] == "Stopped: 5 misses in a row"
     assert "5 misses in a row" in received[0]["content"]
-    assert received[0]["user_agent"] == "AFK"
+    assert received[0]["user_agent"] == "AKF"
 
 
 def test_a_stop_by_the_user_is_not_announced(webhook):
@@ -153,7 +153,7 @@ def test_the_built_ui_is_served_next_to_the_api(tmp_path):
 
     from engine.server import create_app
 
-    (tmp_path / "index.html").write_text("<!doctype html><title>AFK</title>", encoding="utf-8")
+    (tmp_path / "index.html").write_text("<!doctype html><title>AKF</title>", encoding="utf-8")
     app = create_app(Controller(session_factory=sessions), enable_hotkeys=False, ui_dist=tmp_path)
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
@@ -165,7 +165,7 @@ def test_the_built_ui_is_served_next_to_the_api(tmp_path):
         time.sleep(0.01)
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5) as page:
-            assert "<title>AFK</title>" in page.read().decode()
+            assert "<title>AKF</title>" in page.read().decode()
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=5) as health:
             assert json.loads(health.read())["ok"] is True
     finally:

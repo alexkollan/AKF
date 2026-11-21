@@ -1,6 +1,6 @@
 # macOS port
 
-Goal: WoW Forever running natively on a Mac, with AFK driving it from the same Mac. This
+Goal: WoW Forever running natively on a Mac, with AKF driving it from the same Mac. This
 file is the hand-over from the Windows work; read it after `CLAUDE.md` and `docs/PLAN.md`.
 
 **Answered:** WoW Forever has a native macOS client (no Wine): the executable is

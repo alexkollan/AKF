@@ -65,7 +65,7 @@ from tools import metrics
 
 DEFAULT_FIXTURES = Path("tests/fixtures")
 
-WINDOW_TITLE = "AFK replay"
+WINDOW_TITLE = "AKF replay"
 MAX_VIDEO_WIDTH = 1100
 STRIP_HEIGHT = 150
 WAVE_HEIGHT = 92

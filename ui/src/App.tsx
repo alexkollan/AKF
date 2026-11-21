@@ -56,7 +56,7 @@ export default function App() {
       <div className="flex h-full">
         <nav className="flex w-52 shrink-0 flex-col gap-0.5 border-r border-shoal bg-depth/60 p-3">
           <div className="mb-5 px-2 pt-1">
-            <p className="text-lg font-semibold tracking-tight [font-stretch:112%]">AFK</p>
+            <p className="text-lg font-semibold tracking-tight [font-stretch:112%]">AKF</p>
             <p className="truncate text-xs text-mist" title="Active profile">
               {profileName || "no profile"}
             </p>

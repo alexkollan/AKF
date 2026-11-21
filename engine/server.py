@@ -196,7 +196,7 @@ def create_app(
             with contextlib.suppress(asyncio.CancelledError):
                 await pump
 
-    app = FastAPI(title="AFK engine", lifespan=lifespan)
+    app = FastAPI(title="AKF engine", lifespan=lifespan)
     app.state.controller = controller
     app.state.hub = hub
 

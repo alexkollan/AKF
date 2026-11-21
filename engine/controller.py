@@ -85,7 +85,7 @@ def post_json(url: str, payload: dict[str, Any]) -> None:
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "User-Agent": "AFK"},
+        headers={"Content-Type": "application/json", "User-Agent": "AKF"},
         method="POST",
     )
     try:
@@ -587,7 +587,7 @@ class Controller:
         url = self.settings.notifications.webhook_url
         if not url:
             return
-        message = f"AFK {event.status}: {event.reason}"
+        message = f"AKF {event.status}: {event.reason}"
         stats = self.stats_event().stats
         payload = {
             "content": message,  # Discord
